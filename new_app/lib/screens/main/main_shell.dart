@@ -4,8 +4,12 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/goals_provider.dart';
+import '../../providers/recurring_provider.dart';
+import '../../providers/currency_provider.dart';
 import '../home/home_screen.dart';
 import '../expenses/expense_list_screen.dart';
+import '../goals/savings_goals_screen.dart';
+import '../recurring/recurring_screen.dart';
 import '../report/monthly_report_screen.dart';
 import '../settings/settings_screen.dart';
 import '../../utils/app_theme.dart';
@@ -18,7 +22,15 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-  final _screens = const [HomeScreen(), ExpenseListScreen(), MonthlyReportScreen(), SettingsScreen()];
+
+  static const _screens = [
+    HomeScreen(),
+    ExpenseListScreen(),
+    SavingsGoalsScreen(),
+    RecurringScreen(),
+    MonthlyReportScreen(),
+    SettingsScreen(),
+  ];
 
   @override
   void initState() {
@@ -28,7 +40,22 @@ class _MainShellState extends State<MainShell> {
       if (auth.currentUser != null) {
         final uid = auth.currentUser!.id!;
         context.read<ExpenseProvider>()..setUserId(uid)..loadExpenses();
-        context.read<GoalsProvider>()..setUserId(uid)..loadGoals();
+        context.read<GoalsProvider>().setUserId(uid);
+        context.read<RecurringProvider>().setUserId(uid);
+
+        // Init live currency conversion
+        final user = auth.currentUser!;
+        context.read<CurrencyProvider>().init(
+          user.baseCurrency,
+          user.currency,
+        );
+
+        // Auto-trigger recurring expenses yang sudah jatuh tempo
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) {
+            context.read<RecurringProvider>().autoTriggerDue(uid);
+          }
+        });
       }
     });
   }
@@ -37,11 +64,9 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        switchInCurve: Curves.easeOut,
-        switchOutCurve: Curves.easeIn,
-        child: _screens[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: _screens,
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -50,14 +75,16 @@ class _MainShellState extends State<MainShell> {
         ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
                 _buildNavItem(0, Icons.home_rounded, 'Home', isDark),
                 _buildNavItem(1, Icons.receipt_long_rounded, 'Expenses', isDark),
-                _buildNavItem(2, Icons.bar_chart_rounded, 'Reports', isDark),
-                _buildNavItem(3, Icons.settings_rounded, 'Settings', isDark),
+                _buildNavItem(2, Icons.savings_rounded, 'Goals', isDark),
+                _buildNavItem(3, Icons.repeat_rounded, 'Recurring', isDark),
+                _buildNavItem(4, Icons.bar_chart_rounded, 'Reports', isDark),
+                _buildNavItem(5, Icons.settings_rounded, 'Settings', isDark),
               ],
             ),
           ),
@@ -74,20 +101,28 @@ class _MainShellState extends State<MainShell> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
-        padding: EdgeInsets.symmetric(horizontal: isSelected ? 20 : 16, vertical: 10),
+        padding: EdgeInsets.symmetric(horizontal: isSelected ? 14 : 10, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppTheme.accentPurple.withValues(alpha: 0.1) : Colors.transparent,
           borderRadius: BorderRadius.circular(100),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: isSelected ? AppTheme.accentPurple : (isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted), size: 24),
-          if (isSelected) ...[
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: AppTheme.accentPurple, fontWeight: FontWeight.w600, fontSize: 13)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+              color: isSelected ? AppTheme.accentPurple : (isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted),
+              size: isSelected ? 22 : 20),
+            if (isSelected) ...[
+              const SizedBox(height: 2),
+              Text(label,
+                style: const TextStyle(color: AppTheme.accentPurple, fontWeight: FontWeight.w700, fontSize: 9),
+                maxLines: 1,
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
 }
-// updated: 2026-09-23
+// updated: 2026-10-29

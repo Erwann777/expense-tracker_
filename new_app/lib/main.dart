@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'firebase_options.dart';
 import 'providers/auth_provider.dart';
 import 'providers/expense_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/goals_provider.dart';
+import 'providers/recurring_provider.dart';
 import 'providers/pin_auth_provider.dart';
+import 'providers/currency_provider.dart';
 import 'utils/app_theme.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/pin_lock_screen.dart';
@@ -17,9 +21,22 @@ import 'package:google_fonts/google_fonts.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Load .env — tidak crash jika file tidak ditemukan (aman untuk production)
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // .env tidak ada = fitur Gemini scan tidak aktif, app tetap berjalan
+  }
+
   // Initialize Firebase
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Firestore: aktifkan offline persistence + set timeout supaya tidak hang
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,          // Cache data offline
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
   );
 
   SystemChrome.setPreferredOrientations([
@@ -46,7 +63,9 @@ class ExpenseTrackerApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ExpenseProvider()),
         ChangeNotifierProvider(create: (_) => GoalsProvider()),
+        ChangeNotifierProvider(create: (_) => RecurringProvider()),
         ChangeNotifierProvider(create: (_) => PinAuthProvider()..init()),
+        ChangeNotifierProvider(create: (_) => CurrencyProvider()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, _) {
@@ -84,7 +103,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1000),
     );
     _pulseController = AnimationController(
       vsync: this,
@@ -111,33 +130,51 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _checkAuth() async {
-    await Future.delayed(const Duration(milliseconds: 2200));
+    // Animasi splash minimal — hanya 1.2 detik, tidak 2.2 detik
+    await Future.delayed(const Duration(milliseconds: 1200));
     if (!mounted) return;
 
     final auth = context.read<AuthProvider>();
     final pinAuth = context.read<PinAuthProvider>();
 
-    await auth.tryAutoLogin();
-    // Wait for PIN provider to finish initializing
-    while (pinAuth.isLoading) {
-      await Future.delayed(const Duration(milliseconds: 100));
+    // tryAutoLogin dengan timeout 8 detik — tidak hang selamanya
+    try {
+      await auth.tryAutoLogin().timeout(
+        const Duration(seconds: 8),
+        onTimeout: () {
+          // Timeout: lanjut tanpa auto-login (user harus login manual)
+        },
+      );
+    } catch (_) {
+      // Error jaringan dll → lanjut ke login screen
     }
 
     if (!mounted) return;
 
+    // Tunggu PIN provider selesai init — maksimal 5 detik
+    int waited = 0;
+    while (pinAuth.isLoading && waited < 50) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      waited++;
+    }
+
+    if (!mounted) return;
+
+    _navigateNext(auth, pinAuth);
+  }
+
+  void _navigateNext(AuthProvider auth, PinAuthProvider pinAuth) {
     Widget destination;
 
     if (!auth.isLoggedIn) {
-      // Not logged in → go to login
       destination = const LoginScreen();
     } else if (pinAuth.isPinSet) {
-      // Logged in + PIN set → show lock screen
       destination = PinLockScreen(
         onUnlocked: (unlockCtx) {
           Navigator.of(unlockCtx).pushReplacement(
             PageRouteBuilder(
               pageBuilder: (_, _, _) => const MainShell(),
-              transitionDuration: const Duration(milliseconds: 600),
+              transitionDuration: const Duration(milliseconds: 500),
               transitionsBuilder: (_, animation, _, child) {
                 return FadeTransition(
                   opacity: animation,
@@ -155,14 +192,13 @@ class _SplashScreenState extends State<SplashScreen>
         },
       );
     } else {
-      // Logged in but no PIN → go straight to MainShell
       destination = const MainShell();
     }
 
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (_, _, _) => destination,
-        transitionDuration: const Duration(milliseconds: 600),
+        transitionDuration: const Duration(milliseconds: 500),
         transitionsBuilder: (_, animation, _, child) {
           return FadeTransition(
             opacity: animation,

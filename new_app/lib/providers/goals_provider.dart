@@ -14,12 +14,13 @@ class GoalsProvider with ChangeNotifier {
   List<SavingsGoalModel> get activeGoals => _goals.where((g) => !g.isCompleted).toList();
   List<SavingsGoalModel> get completedGoals => _goals.where((g) => g.isCompleted).toList();
   bool get isLoading => _isLoading;
+  String? get userId => _userId;
 
   int get totalBadges {
     int count = 0;
     for (final g in _goals) {
       if (g.isCompleted) {
-        count += 4; // All badges
+        count += 4;
       } else if (g.progress >= 0.75) {
         count += 3;
       } else if (g.progress >= 0.50) {
@@ -40,6 +41,8 @@ class GoalsProvider with ChangeNotifier {
   void setUserId(String userId) {
     if (_userId == userId) return;
     _userId = userId;
+    _isLoading = true;
+    notifyListeners();
     _setupRealtimeListener();
   }
 
@@ -49,14 +52,24 @@ class GoalsProvider with ChangeNotifier {
     _goalsSubscription?.cancel();
     _goalsSubscription = FirebaseService.instance
         .getSavingsGoalsStream(_userId!)
-        .listen((goals) {
-      _goals = goals;
-      notifyListeners();
-    });
+        .listen(
+      (goals) {
+        _goals = goals;
+        _isLoading = false;
+        notifyListeners();
+      },
+      onError: (e) {
+        debugPrint('Error in goals stream: $e');
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
   }
 
   Future<void> loadGoals() async {
     if (_userId == null) return;
+    // Real-time listener already handles updates; this is a fallback one-shot load
+    if (_goals.isNotEmpty) return;
     _isLoading = true;
     notifyListeners();
 

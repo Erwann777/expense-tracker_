@@ -9,6 +9,8 @@ import '../../models/category_model.dart';
 import '../../models/currency_model.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/formatters.dart';
+
+import '../../providers/currency_provider.dart';
 import '../../widgets/progress_ring.dart';
 import '../../widgets/sparkline_chart.dart';
 import '../expenses/add_expense_screen.dart';
@@ -42,8 +44,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkBg : AppTheme.surfaceLight,
-      body: Consumer2<AuthProvider, ExpenseProvider>(
-        builder: (context, auth, expenses, _) {
+      body: Consumer3<AuthProvider, ExpenseProvider, CurrencyProvider>(
+        builder: (context, auth, expenses, cp, _) {
           final user = auth.currentUser;
           if (user == null) return const SizedBox.shrink();
           final currency = user.currency;
@@ -70,10 +72,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 child: CustomScrollView(
                   physics: const ClampingScrollPhysics(),
                   slivers: [
-                    SliverToBoxAdapter(child: _buildIncomeExpenseSummary(context, currency, spent, income, isDark)),
-                    SliverToBoxAdapter(child: _buildBudgetRing(context, currency, spent, budget, remaining, progress, ringColor, statusEmoji, isDark)),
+                    SliverToBoxAdapter(child: _buildIncomeExpenseSummary(context, cp, spent, income, isDark)),
+                    SliverToBoxAdapter(child: _buildBudgetRing(context, cp, spent, budget, remaining, progress, ringColor, statusEmoji, isDark)),
                     SliverToBoxAdapter(child: _buildSparklineSection(context, expenses, currency, momChange, trend, isDark)),
-                    SliverToBoxAdapter(child: _buildSmartInsight(context, trend, remaining, budget, currency, isDark)),
+                    SliverToBoxAdapter(child: _buildSmartInsight(context, trend, remaining, budget, cp, isDark)),
                     SliverToBoxAdapter(child: _buildQuickActions(context, isDark)),
                     SliverToBoxAdapter(child: Padding(
                       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -88,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         return Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
                           child: _buildTransactionTile(context, cat, expense.title, expense.category,
-                            Formatters.currency(expense.amount, currency), Formatters.time(expense.date), expense.isIncome, isDark),
+                            cp.format(expense.amount), Formatters.time(expense.date), expense.isIncome, isDark),
                         );
                       }, childCount: expenses.todayExpenses.length > 5 ? 5 : expenses.todayExpenses.length)),
                     const SliverToBoxAdapter(child: SizedBox(height: 100)),
@@ -168,16 +170,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildIncomeExpenseSummary(BuildContext ctx, String currency, double expense, double income, bool isDark) {
+  Widget _buildIncomeExpenseSummary(BuildContext ctx, CurrencyProvider cp, double expense, double income, bool isDark) {
     final net = income - expense;
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
       child: Row(children: [
-        Expanded(child: _summaryCard('Income', Formatters.currencyCompact(income, currency), Icons.arrow_downward_rounded, AppTheme.accentGreen, isDark)),
+        Expanded(child: _summaryCard('Income', cp.formatCompact(income), Icons.arrow_downward_rounded, AppTheme.accentGreen, isDark)),
         const SizedBox(width: 12),
-        Expanded(child: _summaryCard('Expense', Formatters.currencyCompact(expense, currency), Icons.arrow_upward_rounded, AppTheme.errorRed, isDark)),
+        Expanded(child: _summaryCard('Expense', cp.formatCompact(expense), Icons.arrow_upward_rounded, AppTheme.errorRed, isDark)),
         const SizedBox(width: 12),
-        Expanded(child: _summaryCard('Balance', Formatters.currencyCompact(net.abs(), currency), Icons.account_balance_rounded, 
+        Expanded(child: _summaryCard('Balance', cp.formatCompact(net.abs()), Icons.account_balance_rounded, 
           net >= 0 ? AppTheme.accentGreen : AppTheme.errorRed, isDark, prefix: net >= 0 ? '+' : '-')),
       ]),
     );
@@ -203,7 +205,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildBudgetRing(BuildContext ctx, String currency, double spent, double budget, double remaining, double progress, Color ringColor, String emoji, bool isDark) {
+  Widget _buildBudgetRing(BuildContext ctx, CurrencyProvider cp, double spent, double budget, double remaining, double progress, Color ringColor, String emoji, bool isDark) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Container(
@@ -225,11 +227,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           const SizedBox(width: 24),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _miniStat('Budget', Formatters.currencyCompact(budget, currency), AppTheme.accentBlue, isDark),
+            _miniStat('Budget', cp.formatCompact(budget), AppTheme.accentBlue, isDark),
             const SizedBox(height: 14),
-            _miniStat('Spent', Formatters.currencyCompact(spent, currency), AppTheme.accentPurple, isDark),
+            _miniStat('Spent', cp.formatCompact(spent), AppTheme.accentPurple, isDark),
             const SizedBox(height: 14),
-            _miniStat('Remaining', Formatters.currencyCompact(remaining, currency), AppTheme.accentGreen, isDark),
+            _miniStat('Remaining', cp.formatCompact(remaining), AppTheme.accentGreen, isDark),
           ])),
         ]),
       ),
@@ -278,14 +280,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildSmartInsight(BuildContext ctx, Map<String, dynamic> trend, double remaining, double budget, String currency, bool isDark) {
+  Widget _buildSmartInsight(BuildContext ctx, Map<String, dynamic> trend, double remaining, budget, CurrencyProvider cp, bool isDark) {
     final direction = trend['direction'] as String;
     final daysLeft = DateTime(DateTime.now().year, DateTime.now().month + 1, 0).day - DateTime.now().day;
     final dailyBudget = daysLeft > 0 ? remaining / daysLeft : 0.0;
     String msg; IconData icon; Color color;
-    if (direction == 'increasing') { msg = 'Spending is trending up. Try to limit to ${Formatters.currency(dailyBudget, currency)}/day'; icon = Icons.trending_up_rounded; color = AppTheme.accentOrange; }
+    if (direction == 'increasing') { msg = 'Spending is trending up. Try to limit to ${cp.format(dailyBudget)}/day'; icon = Icons.trending_up_rounded; color = AppTheme.accentOrange; }
     else if (direction == 'decreasing') { msg = 'Great job! Spending is going down 🎉'; icon = Icons.trending_down_rounded; color = AppTheme.accentGreen; }
-    else { msg = 'You can spend ${Formatters.currency(dailyBudget, currency)}/day for the rest of the month'; icon = Icons.lightbulb_rounded; color = AppTheme.accentBlue; }
+    else { msg = 'You can spend ${cp.format(dailyBudget)}/day for the rest of the month'; icon = Icons.lightbulb_rounded; color = AppTheme.accentBlue; }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),

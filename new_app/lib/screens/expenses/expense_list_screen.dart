@@ -8,6 +8,8 @@ import '../../models/expense_model.dart';
 import '../../models/category_model.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/formatters.dart';
+
+import '../../providers/currency_provider.dart';
 import 'add_expense_screen.dart';
 
 class ExpenseListScreen extends StatefulWidget {
@@ -201,8 +203,7 @@ class _ExpenseListScreenState extends State<ExpenseListScreen> {
   }
 
   Widget _buildExpenseList(bool isDark) {
-    return Consumer2<ExpenseProvider, AuthProvider>(builder: (context, exp, auth, _) {
-      final currency = auth.currentUser?.currency ?? 'USD';
+    return Consumer3<ExpenseProvider, AuthProvider, CurrencyProvider>(builder: (context, exp, auth, cp, _) {
       final items = _filterItems(exp.monthlyExpenses);
 
       if (items.isEmpty) {
@@ -272,7 +273,7 @@ class _ExpenseListScreenState extends State<ExpenseListScreen> {
                     flex: 0,
                     child: ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.35),
-                      child: Text('${expense.isIncome ? '+' : '-'} ${Formatters.currency(expense.amount, currency)}',
+                      child: Text('${expense.isIncome ? '+' : '-'} ${cp.format(expense.amount)}',
                         style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: expense.isIncome ? AppTheme.accentGreen : AppTheme.errorRed),
                         maxLines: 1, overflow: TextOverflow.ellipsis),
                     ),

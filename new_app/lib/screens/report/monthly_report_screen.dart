@@ -8,6 +8,8 @@ import '../../providers/expense_provider.dart';
 import '../../models/category_model.dart';
 import '../../utils/app_theme.dart';
 import '../../utils/formatters.dart';
+
+import '../../providers/currency_provider.dart';
 import '../../utils/pdf_report_generator.dart';
 
 class MonthlyReportScreen extends StatefulWidget {
@@ -102,18 +104,17 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             _buildDatePresets(isDark),
             _buildDateRangeDisplay(isDark),
             Expanded(
-              child: Consumer2<ExpenseProvider, AuthProvider>(
-                builder: (context, exp, auth, _) {
-                  final currency = auth.currentUser?.currency ?? 'USD';
+              child: Consumer3<ExpenseProvider, AuthProvider, CurrencyProvider>(
+                builder: (context, exp, auth, cp, _) {
                   final budget = auth.currentUser?.monthlyBudget ?? 0;
                   return CustomScrollView(
                     physics: const BouncingScrollPhysics(),
                     slivers: [
-                      SliverToBoxAdapter(child: _buildSummaryCards(exp, currency, budget, isDark)),
+                      SliverToBoxAdapter(child: _buildSummaryCards(exp, cp, budget, isDark)),
                       SliverToBoxAdapter(child: _buildViewToggle(isDark)),
                       SliverToBoxAdapter(child: _buildChartSection(exp, isDark)),
-                      SliverToBoxAdapter(child: _buildCategoryBreakdown(exp, currency, isDark)),
-                      SliverToBoxAdapter(child: _buildTransactionList(exp, currency, isDark)),
+                      SliverToBoxAdapter(child: _buildCategoryBreakdown(exp, cp, isDark)),
+                      SliverToBoxAdapter(child: _buildTransactionList(exp, cp, isDark)),
                       const SliverToBoxAdapter(child: SizedBox(height: 100)),
                     ],
                   );
@@ -329,7 +330,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     );
   }
 
-  Widget _buildSummaryCards(ExpenseProvider exp, String currency, double budget, bool isDark) {
+  Widget _buildSummaryCards(ExpenseProvider exp, CurrencyProvider cp, double budget, bool isDark) {
     final spent = exp.rangeExpenseTotal;
     final income = exp.rangeIncomeTotal;
     final net = income - spent;
@@ -362,7 +363,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
-                '${net >= 0 ? '+' : ''}${Formatters.currency(net.abs(), currency)}',
+                '${net >= 0 ? '+' : ''}${cp.format(net.abs())}',
                 style: GoogleFonts.inter(
                   fontSize: 34,
                   fontWeight: FontWeight.w800,
@@ -383,7 +384,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   Expanded(
                     child: _summaryItem(
                       'Income',
-                      Formatters.currency(income, currency),
+                      cp.format(income),
                       Icons.arrow_downward_rounded,
                       AppTheme.accentGreen,
                     ),
@@ -392,7 +393,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                   Expanded(
                     child: _summaryItem(
                       'Expense',
-                      Formatters.currency(spent, currency),
+                      cp.format(spent),
                       Icons.arrow_upward_rounded,
                       AppTheme.errorRed,
                     ),
@@ -415,7 +416,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'Budget: ${Formatters.currency((budget - spent).clamp(0, double.infinity).toDouble(), currency)} remaining',
+                        'Budget: ${cp.format((budget - spent).clamp(0, double.infinity).toDouble())} remaining',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -887,7 +888,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     );
   }
 
-  Widget _buildCategoryBreakdown(ExpenseProvider exp, String currency, bool isDark) {
+  Widget _buildCategoryBreakdown(ExpenseProvider exp, CurrencyProvider cp, bool isDark) {
     final catTotals = _reportView == 'income' ? exp.rangeIncomeCategoryTotals : exp.rangeCategoryTotals;
     if (catTotals.isEmpty) return const SizedBox.shrink();
     final total = catTotals.values.fold(0.0, (a, b) => a + b);
@@ -1004,7 +1005,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                               // Amount
                               Flexible(
                                 child: Text(
-                                  Formatters.currency(entry.value, currency),
+                                  cp.format(entry.value),
                                   style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w700,
@@ -1062,7 +1063,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     );
   }
 
-  Widget _buildTransactionList(ExpenseProvider exp, String currency, bool isDark) {
+  Widget _buildTransactionList(ExpenseProvider exp, CurrencyProvider cp, bool isDark) {
     final items = _reportView == 'income' ? exp.rangeIncomeOnly : exp.rangeExpenseOnly;
     if (items.isEmpty) return const SizedBox.shrink();
     return Padding(
@@ -1165,7 +1166,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                         fit: BoxFit.scaleDown,
                         alignment: Alignment.centerRight,
                         child: Text(
-                          '${expense.isIncome ? '+' : '-'}${Formatters.currency(expense.amount, currency)}',
+                          '${expense.isIncome ? '+' : '-'}${cp.format(expense.amount)}',
                           style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,

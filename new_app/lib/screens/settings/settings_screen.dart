@@ -10,7 +10,8 @@ import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/goals_provider.dart';
-import '../../providers/pin_auth_provider.dart';
+import '../../providers/pin_auth_provider.dart';
+import '../../providers/currency_provider.dart';
 import '../../models/currency_model.dart';
 import '../../utils/app_theme.dart';
 import '../auth/login_screen.dart';
@@ -1008,10 +1009,12 @@ class SettingsScreen extends StatelessWidget {
                   final curr = AppCurrencies.currencies[index];
                   final isSelected = auth.currentUser?.currency == curr.code;
                   return GestureDetector(
-                    onTap: () {
+                    onTap: () async {
                       auth.updateCurrency(curr.code);
                       context.read<ExpenseProvider>().loadExpenses();
-                      Navigator.pop(ctx);
+                      // Update live exchange rates
+                      await context.read<CurrencyProvider>().changeDisplayCurrency(curr.code);
+                      if (ctx.mounted) Navigator.pop(ctx);
                     },
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 6),

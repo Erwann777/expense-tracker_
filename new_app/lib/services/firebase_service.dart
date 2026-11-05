@@ -2,7 +2,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_model.dart';
 import '../models/expense_model.dart';
 import '../models/savings_goal_model.dart';
-import '../models/wallet_model.dart';
 import '../models/recurring_expense_model.dart';
 
 /// Firebase service that handles all Firestore operations with real-time synchronization
@@ -17,12 +16,11 @@ class FirebaseService {
   CollectionReference get _usersCollection => _firestore.collection('users');
   CollectionReference get _expensesCollection => _firestore.collection('expenses');
   CollectionReference get _goalsCollection => _firestore.collection('savings_goals');
-  CollectionReference get _walletsCollection => _firestore.collection('wallets');
   CollectionReference get _recurringCollection => _firestore.collection('recurring_expenses');
 
-  // ═══════════════════════════════════════════════
-  // ─── User Operations ───
-  // ═══════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────
+  // ── User Operations ──
+  // ─────────────────────────────────────────────────────
 
   Future<String> createUser(UserModel user) async {
     final docRef = await _usersCollection.add(user.toMap());
@@ -42,11 +40,17 @@ class FirebaseService {
   }
 
   Future<UserModel?> getUserById(String id) async {
-    final doc = await _usersCollection.doc(id).get();
-    if (!doc.exists) return null;
-
-    final data = doc.data() as Map<String, dynamic>;
-    return UserModel.fromMap({...data, 'id': doc.id});
+    try {
+      final doc = await _usersCollection
+          .doc(id)
+          .get()
+          .timeout(const Duration(seconds: 8));
+      if (!doc.exists) return null;
+      final data = doc.data() as Map<String, dynamic>;
+      return UserModel.fromMap({...data, 'id': doc.id});
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<UserModel?> authenticateUser(String username, String password) async {
@@ -76,9 +80,9 @@ class FirebaseService {
     });
   }
 
-  // ═══════════════════════════════════════════════
-  // ─── Expense Operations ───
-  // ═══════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────
+  // ── Expense Operations ──
+  // ─────────────────────────────────────────────────────
 
   Future<String> createExpense(ExpenseModel expense) async {
     final docRef = await _expensesCollection.add(expense.toMap());
@@ -89,18 +93,24 @@ class FirebaseService {
     String userId, {
     bool showHidden = false,
   }) async {
-    Query query = _expensesCollection.where('user_id', isEqualTo: userId);
+    try {
+      final snapshot = await _expensesCollection
+          .where('user_id', isEqualTo: userId)
+          .get();
 
-    if (!showHidden) {
-      query = query.where('is_hidden', isEqualTo: false);
+      final list = snapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return ExpenseModel.fromMap({...data, 'id': doc.id});
+          })
+          .where((e) => showHidden || !e.isHidden)
+          .toList();
+
+      list.sort((a, b) => b.date.compareTo(a.date));
+      return list;
+    } catch (e) {
+      return [];
     }
-
-    final snapshot = await query.orderBy('date', descending: true).get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return ExpenseModel.fromMap({...data, 'id': doc.id});
-    }).toList();
   }
 
   Future<List<ExpenseModel>> getExpensesByDateRange(
@@ -109,20 +119,10 @@ class FirebaseService {
     DateTime end, {
     bool showHidden = false,
   }) async {
-    Query query = _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start.toIso8601String())
-        .where('date', isLessThanOrEqualTo: end.toIso8601String());
-
-    if (!showHidden) {
-      query = query.where('is_hidden', isEqualTo: false);
-    }
-
-    final snapshot = await query.orderBy('date', descending: true).get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return ExpenseModel.fromMap({...data, 'id': doc.id});
+    final all = await getExpenses(userId, showHidden: showHidden);
+    return all.where((e) {
+      return (e.date.isAfter(start) || e.date.isAtSameMomentAs(start)) &&
+          (e.date.isBefore(end) || e.date.isAtSameMomentAs(end));
     }).toList();
   }
 
@@ -145,11 +145,8 @@ class FirebaseService {
 
   Future<List<ExpenseModel>> getLast7DaysExpenses(String userId) async {
     final now = DateTime.now();
-    final start = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(const Duration(days: 6));
+    final start = DateTime(now.year, now.month, now.day)
+        .subtract(const Duration(days: 6));
     final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
     return getExpensesByDateRange(userId, start, end);
   }
@@ -169,23 +166,13 @@ class FirebaseService {
     int month, {
     String type = 'expense',
   }) async {
-    final start = DateTime(year, month, 1).toIso8601String();
-    final end = DateTime(year, month + 1, 0, 23, 59, 59).toIso8601String();
-
-    final snapshot = await _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start)
-        .where('date', isLessThanOrEqualTo: end)
-        .where('is_hidden', isEqualTo: false)
-        .where('type', isEqualTo: type)
-        .get();
-
+    final list = await getExpensesByMonth(userId, year, month);
     double total = 0.0;
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      total += (data['amount'] as num?)?.toDouble() ?? 0.0;
+    for (final e in list) {
+      if (e.type == type) {
+        total += e.amount;
+      }
     }
-
     return total;
   }
 
@@ -203,29 +190,13 @@ class FirebaseService {
     int month, {
     String? type,
   }) async {
-    final start = DateTime(year, month, 1).toIso8601String();
-    final end = DateTime(year, month + 1, 0, 23, 59, 59).toIso8601String();
-
-    Query query = _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start)
-        .where('date', isLessThanOrEqualTo: end)
-        .where('is_hidden', isEqualTo: false);
-
-    if (type != null) {
-      query = query.where('type', isEqualTo: type);
-    }
-
-    final snapshot = await query.get();
-
+    final list = await getExpensesByMonth(userId, year, month);
     final map = <String, double>{};
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final category = data['category'] as String;
-      final amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
-      map[category] = (map[category] ?? 0.0) + amount;
+    for (final e in list) {
+      if (type == null || e.type == type) {
+        map[e.category] = (map[e.category] ?? 0.0) + e.amount;
+      }
     }
-
     return map;
   }
 
@@ -234,35 +205,22 @@ class FirebaseService {
     int days,
   ) async {
     final now = DateTime.now();
-    final start = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(Duration(days: days - 1));
-    final end = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      23,
-      59,
-      59,
-    );
+    final start = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: days - 1));
+    final end = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
-    final snapshot = await _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start.toIso8601String())
-        .where('date', isLessThanOrEqualTo: end.toIso8601String())
-        .where('is_hidden', isEqualTo: false)
-        .where('type', isEqualTo: 'expense')
-        .get();
-
+    final expenses = await getExpensesByDateRange(userId, start, end);
     final dailyMap = <String, double>{};
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final date = DateTime.parse(data['date'] as String);
-      final dayKey = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-      final amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
-      dailyMap[dayKey] = (dailyMap[dayKey] ?? 0.0) + amount;
+    for (int i = 0; i < days; i++) {
+      final d = start.add(Duration(days: i));
+      final k =
+          '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      dailyMap[k] = 0.0;
+    }
+    for (final e in expenses.where((e) => e.isExpense)) {
+      final k =
+          '${e.date.year}-${e.date.month.toString().padLeft(2, '0')}-${e.date.day.toString().padLeft(2, '0')}';
+      dailyMap[k] = (dailyMap[k] ?? 0.0) + e.amount;
     }
 
     final result = <Map<String, dynamic>>[];
@@ -270,7 +228,6 @@ class FirebaseService {
       result.add({'day': entry.key, 'total': entry.value});
     }
     result.sort((a, b) => (a['day'] as String).compareTo(b['day'] as String));
-
     return result;
   }
 
@@ -280,26 +237,13 @@ class FirebaseService {
     DateTime end, {
     String? type,
   }) async {
-    Query query = _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start.toIso8601String())
-        .where('date', isLessThanOrEqualTo: end.toIso8601String())
-        .where('is_hidden', isEqualTo: false);
-
-    if (type != null) {
-      query = query.where('type', isEqualTo: type);
-    }
-
-    final snapshot = await query.get();
-
+    final list = await getExpensesByDateRange(userId, start, end);
     final map = <String, double>{};
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final category = data['category'] as String;
-      final amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
-      map[category] = (map[category] ?? 0.0) + amount;
+    for (final e in list) {
+      if (type == null || e.type == type) {
+        map[e.category] = (map[e.category] ?? 0.0) + e.amount;
+      }
     }
-
     return map;
   }
 
@@ -309,33 +253,19 @@ class FirebaseService {
     DateTime end, {
     String type = 'expense',
   }) async {
-    final snapshot = await _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .where('date', isGreaterThanOrEqualTo: start.toIso8601String())
-        .where('date', isLessThanOrEqualTo: end.toIso8601String())
-        .where('is_hidden', isEqualTo: false)
-        .where('type', isEqualTo: type)
-        .get();
-
+    final list = await getExpensesByDateRange(userId, start, end);
     double total = 0.0;
-    for (final doc in snapshot.docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      total += (data['amount'] as num?)?.toDouble() ?? 0.0;
+    for (final e in list) {
+      if (e.type == type) {
+        total += e.amount;
+      }
     }
-
     return total;
   }
 
   Future<List<Map<String, dynamic>>> getAllExpensesRaw(String userId) async {
-    final snapshot = await _expensesCollection
-        .where('user_id', isEqualTo: userId)
-        .orderBy('date', descending: true)
-        .get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return {...data, 'id': doc.id};
-    }).toList();
+    final list = await getExpenses(userId, showHidden: true);
+    return list.map((e) => e.toMap()).toList();
   }
 
   // Real-time expense updates
@@ -343,23 +273,25 @@ class FirebaseService {
     String userId, {
     bool showHidden = false,
   }) {
-    Query query = _expensesCollection.where('user_id', isEqualTo: userId);
-
-    if (!showHidden) {
-      query = query.where('is_hidden', isEqualTo: false);
-    }
-
-    return query.orderBy('date', descending: true).snapshots().map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return ExpenseModel.fromMap({...data, 'id': doc.id});
-      }).toList();
+    return _expensesCollection
+        .where('user_id', isEqualTo: userId)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return ExpenseModel.fromMap({...data, 'id': doc.id});
+          })
+          .where((e) => showHidden || !e.isHidden)
+          .toList();
+      list.sort((a, b) => b.date.compareTo(a.date));
+      return list;
     });
   }
 
-  // ═══════════════════════════════════════════════
-  // ─── Savings Goals Operations ───
-  // ═══════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────
+  // ── Savings Goals Operations ──
+  // ─────────────────────────────────────────────────────
 
   Future<String> createSavingsGoal(SavingsGoalModel goal) async {
     final docRef = await _goalsCollection.add(goal.toMap());
@@ -367,15 +299,20 @@ class FirebaseService {
   }
 
   Future<List<SavingsGoalModel>> getSavingsGoals(String userId) async {
-    final snapshot = await _goalsCollection
-        .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
-        .get();
+    try {
+      final snapshot = await _goalsCollection
+          .where('user_id', isEqualTo: userId)
+          .get();
 
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return SavingsGoalModel.fromMap({...data, 'id': doc.id});
-    }).toList();
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return SavingsGoalModel.fromMap({...data, 'id': doc.id});
+      }).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (e) {
+      return [];
+    }
   }
 
   Future<void> updateSavingsGoal(SavingsGoalModel goal) async {
@@ -391,63 +328,20 @@ class FirebaseService {
   Stream<List<SavingsGoalModel>> getSavingsGoalsStream(String userId) {
     return _goalsCollection
         .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
+      final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return SavingsGoalModel.fromMap({...data, 'id': doc.id});
       }).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
   }
 
-  // ═══════════════════════════════════════════════
-  // ─── Wallet Operations ───
-  // ═══════════════════════════════════════════════
-
-  Future<String> createWallet(WalletModel wallet) async {
-    final docRef = await _walletsCollection.add(wallet.toMap());
-    return docRef.id;
-  }
-
-  Future<List<WalletModel>> getWallets(String userId) async {
-    final snapshot = await _walletsCollection
-        .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
-        .get();
-
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return WalletModel.fromMap({...data, 'id': doc.id});
-    }).toList();
-  }
-
-  Future<void> updateWallet(WalletModel wallet) async {
-    if (wallet.id == null) return;
-    await _walletsCollection.doc(wallet.id).update(wallet.toMap());
-  }
-
-  Future<void> deleteWallet(String id) async {
-    await _walletsCollection.doc(id).delete();
-  }
-
-  // Real-time wallets stream
-  Stream<List<WalletModel>> getWalletsStream(String userId) {
-    return _walletsCollection
-        .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
-        .snapshots()
-        .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        return WalletModel.fromMap({...data, 'id': doc.id});
-      }).toList();
-    });
-  }
-
-  // ═══════════════════════════════════════════════
-  // ─── Recurring Expenses Operations ───
-  // ═══════════════════════════════════════════════
+  // ─────────────────────────────────────────────────────
+  // ── Recurring Expenses Operations ──
+  // ─────────────────────────────────────────────────────
 
   Future<String> createRecurringExpense(RecurringExpenseModel recurring) async {
     final docRef = await _recurringCollection.add(recurring.toMap());
@@ -455,15 +349,20 @@ class FirebaseService {
   }
 
   Future<List<RecurringExpenseModel>> getRecurringExpenses(String userId) async {
-    final snapshot = await _recurringCollection
-        .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
-        .get();
+    try {
+      final snapshot = await _recurringCollection
+          .where('user_id', isEqualTo: userId)
+          .get();
 
-    return snapshot.docs.map((doc) {
-      final data = doc.data() as Map<String, dynamic>;
-      return RecurringExpenseModel.fromMap({...data, 'id': doc.id});
-    }).toList();
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        return RecurringExpenseModel.fromMap({...data, 'id': doc.id});
+      }).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (e) {
+      return [];
+    }
   }
 
   Future<void> updateRecurringExpense(RecurringExpenseModel recurring) async {
@@ -479,13 +378,116 @@ class FirebaseService {
   Stream<List<RecurringExpenseModel>> getRecurringExpensesStream(String userId) {
     return _recurringCollection
         .where('user_id', isEqualTo: userId)
-        .orderBy('created_at', descending: true)
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
+      final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return RecurringExpenseModel.fromMap({...data, 'id': doc.id});
       }).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
     });
+  }
+
+  // ─────────────────────────────────────────────────────
+  // ── Recurring → Expense Sync (Atomic Batch) ──
+  // ─────────────────────────────────────────────────────
+
+  /// Trigger satu periode recurring secara ATOMIC menggunakan Firestore batch:
+  /// 1. Buat dokumen expense baru dengan tanggal = [dueDate]
+  /// 2. Update `last_triggered` di dokumen recurring
+  ///
+  /// Jika salah satu gagal → keduanya dibatalkan (tidak ada data setengah-setengah).
+  Future<String> triggerRecurringExpense({
+    required RecurringExpenseModel recurring,
+    required String userId,
+    required DateTime dueDate,
+  }) async {
+    if (recurring.id == null) throw Exception('Recurring ID tidak boleh null');
+
+    final expenseRef = _expensesCollection.doc(); // auto-generated ID
+    final recurringRef = _recurringCollection.doc(recurring.id);
+
+    final expense = ExpenseModel(
+      userId: userId,
+      title: recurring.title,
+      amount: recurring.amount,
+      type: 'expense',
+      category: recurring.category,
+      date: dueDate,
+      recurringId: recurring.id,
+      note: 'Recurring: ${recurring.title}',
+    );
+
+    // Gunakan WriteBatch — create expense + update lastTriggered dalam 1 operasi
+    final batch = _firestore.batch();
+    batch.set(expenseRef, expense.toMap());
+    batch.update(recurringRef, {'last_triggered': dueDate.toIso8601String()});
+    await batch.commit();
+
+    return expenseRef.id;
+  }
+
+  /// Trigger BANYAK periode recurring sekaligus menggunakan Firestore batch.
+  ///
+  /// [entries] adalah list of map:
+  ///   - 'recurring': RecurringExpenseModel
+  ///   - 'dueDate'  : DateTime (tanggal jatuh tempo periode tersebut)
+  ///   - 'userId'   : String
+  ///
+  /// Firestore batch maksimal 500 operasi per commit.
+  /// Method ini otomatis memecah jadi beberapa batch jika > 200 periode.
+  ///
+  /// Returns jumlah expense yang berhasil dibuat.
+  Future<int> batchTriggerRecurringExpenses(
+    List<Map<String, dynamic>> entries,
+  ) async {
+    if (entries.isEmpty) return 0;
+
+    int created = 0;
+    // Tiap periode = 2 operasi (set expense + update recurring)
+    // Firestore limit 500 ops/batch → aman pakai 200 periode per batch
+    const int chunkSize = 200;
+
+    for (int start = 0; start < entries.length; start += chunkSize) {
+      final chunk = entries.sublist(
+        start,
+        (start + chunkSize).clamp(0, entries.length),
+      );
+
+      final batch = _firestore.batch();
+
+      for (final entry in chunk) {
+        final recurring = entry['recurring'] as RecurringExpenseModel;
+        final dueDate = entry['dueDate'] as DateTime;
+        final userId = entry['userId'] as String;
+
+        if (recurring.id == null) continue;
+
+        final expenseRef = _expensesCollection.doc();
+        final recurringRef = _recurringCollection.doc(recurring.id);
+
+        final expense = ExpenseModel(
+          userId: userId,
+          title: recurring.title,
+          amount: recurring.amount,
+          type: 'expense',
+          category: recurring.category,
+          date: dueDate,
+          recurringId: recurring.id,
+          note: 'Recurring: ${recurring.title}',
+        );
+
+        batch.set(expenseRef, expense.toMap());
+        batch.update(recurringRef, {
+          'last_triggered': dueDate.toIso8601String(),
+        });
+        created++;
+      }
+
+      await batch.commit();
+    }
+
+    return created;
   }
 }

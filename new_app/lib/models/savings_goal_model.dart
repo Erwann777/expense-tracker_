@@ -1,3 +1,5 @@
+import '../utils/model_parsers.dart';
+
 class SavingsGoalModel {
   final String? id;
   final String userId;
@@ -54,8 +56,9 @@ class SavingsGoalModel {
     return 'New Goal';
   }
 
+  /// toMap() does NOT include 'id' — Firestore uses document ID for that.
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
+    return {
       'user_id': userId,
       'title': title,
       'emoji': emoji,
@@ -65,25 +68,19 @@ class SavingsGoalModel {
       'color': color,
       'created_at': createdAt.toIso8601String(),
     };
-    if (id != null) map['id'] = id;
-    return map;
   }
 
   factory SavingsGoalModel.fromMap(Map<String, dynamic> map) {
     return SavingsGoalModel(
       id: map['id']?.toString(),
-      userId: map['user_id']?.toString() ?? '',
-      title: (map['title'] as String?) ?? '',
-      emoji: (map['emoji'] as String?) ?? '🎯',
-      targetAmount: (map['target_amount'] as num?)?.toDouble() ?? 0.0,
-      savedAmount: (map['saved_amount'] as num?)?.toDouble() ?? 0.0,
-      deadline: map['deadline'] != null
-          ? DateTime.parse(map['deadline'] as String)
-          : DateTime.now(),
-      color: (map['color'] as int?) ?? 0xFF7C3AED,
-      createdAt: map['created_at'] != null
-          ? DateTime.parse(map['created_at'] as String)
-          : DateTime.now(),
+      userId: ModelParsers.parseString(map['user_id'] ?? map['userId']),
+      title: ModelParsers.parseString(map['title'] ?? map['name'], 'New Goal'),
+      emoji: ModelParsers.parseString(map['emoji'], '🎯'),
+      targetAmount: ModelParsers.parseDouble(map['target_amount'] ?? map['targetAmount']),
+      savedAmount: ModelParsers.parseDouble(map['saved_amount'] ?? map['savedAmount']),
+      deadline: ModelParsers.parseDateTime(map['deadline']),
+      color: ModelParsers.parseInt(map['color'], 0xFF7C3AED),
+      createdAt: ModelParsers.parseDateTime(map['created_at'] ?? map['createdAt']),
     );
   }
 

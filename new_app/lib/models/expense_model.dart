@@ -1,3 +1,5 @@
+import '../utils/model_parsers.dart';
+
 class ExpenseModel {
   final String? id;
   final String userId;
@@ -7,7 +9,6 @@ class ExpenseModel {
   final String type; // 'expense' or 'income'
   final String? note;
   final DateTime date;
-  final String? walletId;
   final String? receiptPath;
   final bool isHidden;
   final String? recurringId;
@@ -23,7 +24,6 @@ class ExpenseModel {
     this.type = 'expense',
     this.note,
     required this.date,
-    this.walletId,
     this.receiptPath,
     this.isHidden = false,
     this.recurringId,
@@ -34,8 +34,9 @@ class ExpenseModel {
   bool get isIncome => type == 'income';
   bool get isExpense => type == 'expense';
 
+  /// toMap() does NOT include 'id' — Firestore uses document ID for that.
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
+    return {
       'user_id': userId,
       'title': title,
       'amount': amount,
@@ -43,43 +44,29 @@ class ExpenseModel {
       'type': type,
       'note': note,
       'date': date.toIso8601String(),
-      'wallet_id': walletId,
       'receipt_path': receiptPath,
       'is_hidden': isHidden,
       'recurring_id': recurringId,
       'split_group_id': splitGroupId,
       'created_at': createdAt.toIso8601String(),
     };
-    if (id != null) map['id'] = id;
-    return map;
   }
 
   factory ExpenseModel.fromMap(Map<String, dynamic> map) {
-    bool parseIsHidden(dynamic val) {
-      if (val is bool) return val;
-      if (val is int) return val == 1;
-      return false;
-    }
-
     return ExpenseModel(
       id: map['id']?.toString(),
-      userId: map['user_id']?.toString() ?? '',
-      title: (map['title'] as String?) ?? '',
-      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
-      category: (map['category'] as String?) ?? 'Other',
-      type: (map['type'] as String?) ?? 'expense',
+      userId: ModelParsers.parseString(map['user_id'] ?? map['userId']),
+      title: ModelParsers.parseString(map['title'] ?? map['name'], 'Expense'),
+      amount: ModelParsers.parseDouble(map['amount']),
+      category: ModelParsers.parseString(map['category'], 'Other'),
+      type: ModelParsers.parseString(map['type'], 'expense'),
       note: map['note'] as String?,
-      date: map['date'] != null
-          ? DateTime.parse(map['date'] as String)
-          : DateTime.now(),
-      walletId: map['wallet_id']?.toString(),
+      date: ModelParsers.parseDateTime(map['date']),
       receiptPath: map['receipt_path'] as String?,
-      isHidden: parseIsHidden(map['is_hidden']),
-      recurringId: map['recurring_id']?.toString(),
-      splitGroupId: map['split_group_id']?.toString(),
-      createdAt: map['created_at'] != null
-          ? DateTime.parse(map['created_at'] as String)
-          : DateTime.now(),
+      isHidden: ModelParsers.parseBool(map['is_hidden'] ?? map['isHidden'], false),
+      recurringId: map['recurring_id']?.toString() ?? map['recurringId']?.toString(),
+      splitGroupId: map['split_group_id']?.toString() ?? map['splitGroupId']?.toString(),
+      createdAt: ModelParsers.parseDateTime(map['created_at'] ?? map['createdAt']),
     );
   }
 
@@ -92,7 +79,6 @@ class ExpenseModel {
     String? type,
     String? note,
     DateTime? date,
-    String? walletId,
     String? receiptPath,
     bool? isHidden,
     String? recurringId,
@@ -108,7 +94,6 @@ class ExpenseModel {
       type: type ?? this.type,
       note: note ?? this.note,
       date: date ?? this.date,
-      walletId: walletId ?? this.walletId,
       receiptPath: receiptPath ?? this.receiptPath,
       isHidden: isHidden ?? this.isHidden,
       recurringId: recurringId ?? this.recurringId,

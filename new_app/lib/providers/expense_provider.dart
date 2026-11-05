@@ -72,18 +72,31 @@ class ExpenseProvider with ChangeNotifier {
     _expenseSubscription?.cancel();
     _expenseSubscription = FirebaseService.instance
         .getExpensesStream(_userId!)
-        .listen((expenses) {
-      _expenses = expenses;
-      _recalculateAggregates();
-    });
+        .listen(
+      (expenses) {
+        _expenses = expenses;
+        _isLoading = false;
+        _recalculateAggregates();
+      },
+      onError: (e) {
+        debugPrint('Error in expenses stream: $e');
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
 
     _recurringSubscription?.cancel();
     _recurringSubscription = FirebaseService.instance
         .getRecurringExpensesStream(_userId!)
-        .listen((recurring) {
-      _recurringExpenses = recurring;
-      notifyListeners();
-    });
+        .listen(
+      (recurring) {
+        _recurringExpenses = recurring;
+        notifyListeners();
+      },
+      onError: (e) {
+        debugPrint('Error in recurring expenses stream (expense provider): $e');
+      },
+    );
   }
 
   void _recalculateAggregates() {
@@ -282,6 +295,8 @@ class ExpenseProvider with ChangeNotifier {
     _isLoading = false;
     notifyListeners();
   }
+
+  // ─── CRUD ───
 
   Future<bool> addExpense(ExpenseModel expense) async {
     try {

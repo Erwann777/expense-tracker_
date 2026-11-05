@@ -1,3 +1,5 @@
+import '../utils/model_parsers.dart';
+
 class RecurringExpenseModel {
   final String? id;
   final String userId;
@@ -5,7 +7,6 @@ class RecurringExpenseModel {
   final double amount;
   final String category;
   final String frequency; // 'daily', 'weekly', 'monthly', 'yearly'
-  final String? walletId;
   final DateTime startDate;
   final DateTime? endDate;
   final DateTime? lastTriggered;
@@ -19,7 +20,6 @@ class RecurringExpenseModel {
     required this.amount,
     required this.category,
     required this.frequency,
-    this.walletId,
     required this.startDate,
     this.endDate,
     this.lastTriggered,
@@ -27,52 +27,35 @@ class RecurringExpenseModel {
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
+  /// toMap() does NOT include 'id' — Firestore uses document ID for that.
   Map<String, dynamic> toMap() {
-    final map = <String, dynamic>{
+    return {
       'user_id': userId,
       'title': title,
       'amount': amount,
       'category': category,
       'frequency': frequency,
-      'wallet_id': walletId,
       'start_date': startDate.toIso8601String(),
       'end_date': endDate?.toIso8601String(),
       'last_triggered': lastTriggered?.toIso8601String(),
       'is_active': isActive,
       'created_at': createdAt.toIso8601String(),
     };
-    if (id != null) map['id'] = id;
-    return map;
   }
 
   factory RecurringExpenseModel.fromMap(Map<String, dynamic> map) {
-    bool parseIsActive(dynamic val) {
-      if (val is bool) return val;
-      if (val is int) return val == 1;
-      return true;
-    }
-
     return RecurringExpenseModel(
       id: map['id']?.toString(),
-      userId: map['user_id']?.toString() ?? '',
-      title: (map['title'] as String?) ?? '',
-      amount: (map['amount'] as num?)?.toDouble() ?? 0.0,
-      category: (map['category'] as String?) ?? 'Other',
-      frequency: (map['frequency'] as String?) ?? 'monthly',
-      walletId: map['wallet_id']?.toString(),
-      startDate: map['start_date'] != null
-          ? DateTime.parse(map['start_date'] as String)
-          : DateTime.now(),
-      endDate: map['end_date'] != null
-          ? DateTime.parse(map['end_date'] as String)
-          : null,
-      lastTriggered: map['last_triggered'] != null
-          ? DateTime.parse(map['last_triggered'] as String)
-          : null,
-      isActive: parseIsActive(map['is_active']),
-      createdAt: map['created_at'] != null
-          ? DateTime.parse(map['created_at'] as String)
-          : DateTime.now(),
+      userId: ModelParsers.parseString(map['user_id'] ?? map['userId']),
+      title: ModelParsers.parseString(map['title'] ?? map['name'], 'Recurring'),
+      amount: ModelParsers.parseDouble(map['amount'] ?? map['balance']),
+      category: ModelParsers.parseString(map['category'], 'Other'),
+      frequency: ModelParsers.parseString(map['frequency'], 'monthly'),
+      startDate: ModelParsers.parseDateTime(map['start_date'] ?? map['startDate']),
+      endDate: ModelParsers.parseOptionalDateTime(map['end_date'] ?? map['endDate']),
+      lastTriggered: ModelParsers.parseOptionalDateTime(map['last_triggered'] ?? map['lastTriggered']),
+      isActive: ModelParsers.parseBool(map['is_active'] ?? map['isActive'], true),
+      createdAt: ModelParsers.parseDateTime(map['created_at'] ?? map['createdAt']),
     );
   }
 
@@ -83,7 +66,6 @@ class RecurringExpenseModel {
     double? amount,
     String? category,
     String? frequency,
-    String? walletId,
     DateTime? startDate,
     DateTime? endDate,
     DateTime? lastTriggered,
@@ -97,7 +79,6 @@ class RecurringExpenseModel {
       amount: amount ?? this.amount,
       category: category ?? this.category,
       frequency: frequency ?? this.frequency,
-      walletId: walletId ?? this.walletId,
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
       lastTriggered: lastTriggered ?? this.lastTriggered,
@@ -128,6 +109,6 @@ class RecurringExpenseModel {
     {'key': 'daily', 'label': 'Daily', 'icon': '📅'},
     {'key': 'weekly', 'label': 'Weekly', 'icon': '📆'},
     {'key': 'monthly', 'label': 'Monthly', 'icon': '🗓️'},
-    {'key': 'yearly', 'label': 'Yearly', 'icon': '🎯'},
+    {'key': 'yearly', 'label': 'Yearly', 'icon': '📋'},
   ];
 }
