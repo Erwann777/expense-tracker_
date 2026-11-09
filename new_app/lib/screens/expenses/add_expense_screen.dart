@@ -1,10 +1,12 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+
 import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../models/expense_model.dart';
@@ -36,6 +38,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   bool _isScanningReceipt = false;
+  bool _categoryManuallySelected = false;
+  bool _dateManuallySelected = false;
+  File? _pendingReceiptFile;
 
   /// Menyimpan hasil scan terakhir — ditampilkan di preview card
   ReceiptScanResult? _lastScanResult;
@@ -65,6 +70,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
       _selectedDate = e.date;
       _selectedTime = TimeOfDay.fromDateTime(e.date);
       _isIncome = e.isIncome;
+      _categoryManuallySelected = true;
+      _dateManuallySelected = true;
     } else {
       _selectedCategory = _isIncome
           ? AppCategories.incomeCategories.first.name
@@ -88,6 +95,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
     setState(() {
       _isIncome = income;
       _selectedCategory = _currentCategories.first.name;
+      _categoryManuallySelected = false;
       _lastScanResult = null;
     });
   }
@@ -107,6 +115,21 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
       _selectedTime.minute,
     );
 
+    String? savedReceiptPath;
+    if (_pendingReceiptFile != null) {
+      try {
+        savedReceiptPath = await GeminiReceiptService.saveReceiptImage(
+          _pendingReceiptFile!,
+        );
+      } on FileSystemException catch (e) {
+        _showSnack('Could not save receipt image: ${e.message}');
+        return;
+      } catch (e) {
+        _showSnack('Could not save receipt image: $e');
+        return;
+      }
+    }
+
     final expense = ExpenseModel(
       id: widget.expense?.id,
       userId: userId,
@@ -118,7 +141,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           ? null
           : _noteController.text.trim(),
       date: date,
-      receiptPath: widget.expense?.receiptPath,
+      receiptPath: savedReceiptPath ?? widget.expense?.receiptPath,
       isHidden: widget.expense?.isHidden ?? false,
     );
 
@@ -141,6 +164,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           backgroundColor: AppTheme.accentGreen,
         ),
       );
+    } else if (!success && savedReceiptPath != null) {
+      try {
+        await File(savedReceiptPath).delete();
+      } on FileSystemException catch (e) {
+        _showSnack('Could not clean up saved receipt image: ${e.message}');
+      }
     }
   }
 
@@ -196,11 +225,11 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
   Future<void> _scanReceipt() async {
     if (_isScanningReceipt) return;
     if (!_canScanReceipt) {
-      _showSnack('Receipt scanning hanya tersedia di Android dan iOS.');
+      _showSnack('Receipt scanning is only available on Android and iOS.');
       return;
     }
 
-    // Pilih sumber gambar: kamera atau galeri
+    // Choose an image source: camera or gallery.
     final source = await _showImageSourceDialog();
     if (source == null) return;
 
@@ -219,30 +248,36 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
       final imageFile = File(pickedFile.path);
 
-      // Kirim ke Gemini API
+      // Send the receipt image to Gemini.
       final result = await GeminiReceiptService.scanReceipt(imageFile);
 
       if (!mounted) return;
 
       if (result.hasError) {
-        _showSnack('❌ ${result.errorMessage}');
+        _showSnack(result.errorMessage!);
         return;
       }
 
-      // Terapkan hasil scan ke form
-      _applyReceiptResult(result);
+      final suggestedResult = _personalizeCategorySuggestion(
+        result,
+        context.read<ExpenseProvider>().expenses,
+      );
+      _applyReceiptResult(suggestedResult);
 
-      setState(() => _lastScanResult = result);
+      setState(() {
+        _lastScanResult = suggestedResult;
+        _pendingReceiptFile = imageFile;
+      });
     } on PlatformException {
-      _showSnack('Tidak bisa mengakses kamera. Coba lagi.');
+      _showSnack('Could not access the camera. Please try again.');
     } catch (e) {
-      _showSnack('Error: $e');
+      _showSnack('Could not scan the receipt: $e');
     } finally {
       if (mounted) setState(() => _isScanningReceipt = false);
     }
   }
 
-  /// Tampilkan dialog pilih sumber gambar (kamera / galeri)
+  /// Shows the camera/gallery image-source picker.
   Future<ImageSource?> _showImageSourceDialog() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet<ImageSource>(
@@ -258,14 +293,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 40, height: 4,
+                width: 40,
+                height: 4,
                 decoration: BoxDecoration(
                   color: isDark ? AppTheme.darkDivider : AppTheme.divider,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               const SizedBox(height: 20),
-              // Header
+              // Header.
               Row(
                 children: [
                   Container(
@@ -274,24 +310,35 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                       color: AppTheme.accentPurple.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.auto_awesome_rounded,
-                        color: AppTheme.accentPurple, size: 20),
+                    child: const Icon(
+                      Icons.auto_awesome_rounded,
+                      color: AppTheme.accentPurple,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('AI Receipt Scanner',
-                          style: GoogleFonts.inter(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: isDark ? AppTheme.darkText : AppTheme.textPrimary)),
-                      Text('Powered by Gemini AI',
-                          style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: isDark
-                                  ? AppTheme.darkTextSecondary
-                                  : AppTheme.textSecondary)),
+                      Text(
+                        'AI Receipt Scanner',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? AppTheme.darkText
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        'Powered by Gemini AI',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: isDark
+                              ? AppTheme.darkTextSecondary
+                              : AppTheme.textSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -301,8 +348,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
               _imageSourceTile(
                 ctx: ctx,
                 icon: Icons.camera_alt_rounded,
-                label: 'Ambil Foto',
-                subtitle: 'Foto receipt langsung dengan kamera',
+                label: 'Take a photo',
+                subtitle: 'Capture a receipt with your camera',
                 source: ImageSource.camera,
                 isDark: isDark,
               ),
@@ -311,8 +358,8 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
               _imageSourceTile(
                 ctx: ctx,
                 icon: Icons.photo_library_rounded,
-                label: 'Pilih dari Galeri',
-                subtitle: 'Gunakan foto receipt yang sudah ada',
+                label: 'Choose from gallery',
+                subtitle: 'Select an existing receipt photo',
                 source: ImageSource.gallery,
                 isDark: isDark,
               ),
@@ -358,50 +405,104 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label,
-                      style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? AppTheme.darkText : AppTheme.textPrimary)),
-                  Text(subtitle,
-                      style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: isDark
-                              ? AppTheme.darkTextSecondary
-                              : AppTheme.textSecondary)),
+                  Text(
+                    label,
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.textSecondary,
+                    ),
+                  ),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right_rounded,
-                color: isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted,
+            ),
           ],
         ),
       ),
     );
   }
 
-  /// Terapkan hasil scan Gemini ke form fields
+  ReceiptScanResult _personalizeCategorySuggestion(
+    ReceiptScanResult result,
+    List<ExpenseModel> expenses,
+  ) {
+    final merchant = result.merchantName?.toLowerCase().replaceAll(
+      RegExp(r'[^a-z0-9]'),
+      '',
+    );
+    if (merchant == null || merchant.length < 4) return result;
+
+    final categoryCounts = <String, int>{};
+    for (final expense in expenses.where((item) => item.isExpense)) {
+      final title = expense.title.toLowerCase().replaceAll(
+        RegExp(r'[^a-z0-9]'),
+        '',
+      );
+      if (title.contains(merchant) &&
+          _currentCategories.any(
+            (category) => category.name == expense.category,
+          )) {
+        categoryCounts[expense.category] =
+            (categoryCounts[expense.category] ?? 0) + 1;
+      }
+    }
+
+    if (categoryCounts.isEmpty) return result;
+    final sortedCategories = categoryCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (sortedCategories.length > 1 &&
+        sortedCategories[0].value == sortedCategories[1].value) {
+      return result;
+    }
+
+    final commonCategory = sortedCategories.first;
+    final count = commonCategory.value;
+    return result.copyWith(
+      suggestedCategory: commonCategory.key,
+      categoryReason:
+          'Based on $count previous ${count == 1 ? 'expense' : 'expenses'} at ${result.merchantName}.',
+    );
+  }
+
+  /// Apply scan suggestions without replacing values the user already entered.
   void _applyReceiptResult(ReceiptScanResult result) {
     setState(() {
-      // Isi amount
-      if (result.hasAmount) {
+      final appCurrency = context.read<AuthProvider>().currentUser?.currency;
+      final hasCurrencyMismatch =
+          result.currencyCode != null &&
+          appCurrency != null &&
+          result.currencyCode != appCurrency;
+      if (result.hasAmount &&
+          !hasCurrencyMismatch &&
+          _amountController.text.trim().isEmpty) {
         _amountController.text = result.totalAmount!.toStringAsFixed(2);
       }
 
-      // Isi merchant name sebagai title jika title masih kosong
       if (result.merchantName != null && _titleController.text.trim().isEmpty) {
         _titleController.text = result.merchantName!;
       }
 
-      // Isi tanggal transaksi
-      if (result.transactionDate != null) {
+      if (result.transactionDate != null && !_dateManuallySelected) {
         _selectedDate = result.transactionDate!;
       }
 
-      // Pilih kategori yang disarankan AI
-      if (result.suggestedCategory != null) {
-        final catExists = _currentCategories
-            .any((c) => c.name == result.suggestedCategory);
+      if (result.suggestedCategory != null && !_categoryManuallySelected) {
+        final catExists = _currentCategories.any(
+          (c) => c.name == result.suggestedCategory,
+        );
         if (catExists) {
           _selectedCategory = result.suggestedCategory!;
         }
@@ -411,9 +512,9 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ---------------------------------------------------------------------------
@@ -562,8 +663,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                           ? AppTheme.accentGreen
                           : AppTheme.accentPurple,
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusMd),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
                       ),
                       elevation: 4,
                       shadowColor:
@@ -606,7 +706,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
   // WIDGETS
   // ---------------------------------------------------------------------------
 
-  /// Tombol scan receipt dengan animasi loading
+  /// Receipt scan button with a loading indicator.
   Widget _buildScanButton(bool isDark) {
     return SizedBox(
       width: double.infinity,
@@ -641,7 +741,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    'AI sedang menganalisis receipt...',
+                    'AI is analyzing the receipt...',
                     style: GoogleFonts.inter(
                       fontWeight: FontWeight.w600,
                       color: AppTheme.accentPurple.withValues(alpha: 0.6),
@@ -655,13 +755,15 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                   const Icon(Icons.auto_awesome_rounded, size: 18),
                   const SizedBox(width: 8),
                   Text(
-                    'Scan Receipt dengan AI',
+                    'Scan receipt with AI',
                     style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: AppTheme.accentPurple.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
@@ -669,9 +771,10 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                     child: Text(
                       'Gemini',
                       style: GoogleFonts.inter(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.accentPurple),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.accentPurple,
+                      ),
                     ),
                   ),
                 ],
@@ -680,53 +783,55 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
     );
   }
 
-  /// Card preview hasil scan AI — menampilkan confidence dan data yang diekstrak
+  /// Preview card showing the scan result and extracted data.
   Widget _buildScanResultCard(ReceiptScanResult result, bool isDark) {
     final confidence = (result.confidence * 100).toStringAsFixed(0);
     final confColor = result.confidence >= 0.8
         ? AppTheme.accentGreen
         : result.confidence >= 0.5
-            ? const Color(0xFFF59E0B)
-            : AppTheme.errorRed;
+        ? const Color(0xFFF59E0B)
+        : AppTheme.errorRed;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.accentGreen.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppTheme.accentGreen.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: AppTheme.accentGreen.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.check_circle_rounded,
-                  color: AppTheme.accentGreen, size: 18),
+              const Icon(
+                Icons.check_circle_rounded,
+                color: AppTheme.accentGreen,
+                size: 18,
+              ),
               const SizedBox(width: 8),
               Text(
-                'Hasil Scan AI',
+                'AI scan results',
                 style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.accentGreen),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.accentGreen,
+                ),
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: confColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Akurasi $confidence%',
+                  'Model confidence (estimate): $confidence%',
                   style: GoogleFonts.inter(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: confColor),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: confColor,
+                  ),
                 ),
               ),
             ],
@@ -734,40 +839,100 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
           const SizedBox(height: 10),
           if (result.merchantName != null)
             _resultRow(
-                Icons.store_rounded,
-                'Merchant',
-                result.merchantName!,
-                isDark),
+              Icons.store_rounded,
+              'Merchant',
+              result.merchantName!,
+              isDark,
+            ),
           if (result.hasAmount)
             _resultRow(
-                Icons.payments_rounded,
-                'Total',
-                result.totalAmount!.toStringAsFixed(2),
-                isDark),
+              Icons.payments_rounded,
+              _fieldLabel(
+                result.currencyCode == null
+                    ? 'Total'
+                    : 'Total (${result.currencyCode})',
+                result.fieldConfidence['total_amount'],
+              ),
+              result.totalAmount!.toStringAsFixed(2),
+              isDark,
+            ),
+          if (result.currencyCode != null &&
+              context.read<AuthProvider>().currentUser?.currency != null &&
+              result.currencyCode !=
+                  context.read<AuthProvider>().currentUser!.currency)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6, left: 22),
+              child: Text(
+                'Receipt currency differs from your account currency. Convert the total manually before saving; no exchange rate is applied.',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: AppTheme.errorRed,
+                ),
+              ),
+            ),
+          if (result.hasAmount &&
+              result.currencyCode == null &&
+              context.read<AuthProvider>().currentUser?.currency != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6, left: 22),
+              child: Text(
+                'Currency could not be identified. Confirm this amount is in your account currency.',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: const Color(0xFFF59E0B),
+                ),
+              ),
+            ),
           if (result.transactionDate != null)
             _resultRow(
-                Icons.calendar_today_rounded,
-                'Tanggal',
-                '${result.transactionDate!.day}/${result.transactionDate!.month}/${result.transactionDate!.year}',
-                isDark),
+              Icons.calendar_today_rounded,
+              _fieldLabel('Date', result.fieldConfidence['transaction_date']),
+              Formatters.date(result.transactionDate!),
+              isDark,
+            ),
           if (result.suggestedCategory != null)
             _resultRow(
-                Icons.category_rounded,
-                'Kategori',
-                result.suggestedCategory!,
-                isDark),
+              Icons.category_rounded,
+              _fieldLabel(
+                'Suggested category',
+                result.fieldConfidence['category'],
+              ),
+              result.suggestedCategory!,
+              isDark,
+            ),
+          if (result.categoryReason != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6, left: 22),
+              child: Text(
+                result.categoryReason!,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.textSecondary,
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
           Text(
-            '✨ Form telah diisi otomatis. Periksa dan sesuaikan jika perlu.',
+            'AI suggested values for fields you had not filled in. Review all details before saving. Model confidence is an estimate, not a measured accuracy score.',
             style: GoogleFonts.inter(
-                fontSize: 11,
-                color: isDark
-                    ? AppTheme.darkTextSecondary
-                    : AppTheme.textSecondary),
+              fontSize: 11,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.textSecondary,
+            ),
           ),
         ],
       ),
     );
+  }
+
+  String _fieldLabel(String label, double? confidence) {
+    if (confidence != null && confidence < 0.5) {
+      return '$label · review';
+    }
+    return label;
   }
 
   Widget _resultRow(IconData icon, String label, String value, bool isDark) {
@@ -775,25 +940,29 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
       padding: const EdgeInsets.only(bottom: 6),
       child: Row(
         children: [
-          Icon(icon,
-              size: 14,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted),
+          Icon(
+            icon,
+            size: 14,
+            color: isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted,
+          ),
           const SizedBox(width: 6),
           Text(
             '$label: ',
             style: GoogleFonts.inter(
-                fontSize: 12,
-                color: isDark
-                    ? AppTheme.darkTextSecondary
-                    : AppTheme.textSecondary),
+              fontSize: 12,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.textSecondary,
+            ),
           ),
           Expanded(
             child: Text(
               value,
               style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? AppTheme.darkText : AppTheme.textPrimary),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -1022,7 +1191,10 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
         return GestureDetector(
           onTap: () {
             HapticFeedback.selectionClick();
-            setState(() => _selectedCategory = cat.name);
+            setState(() {
+              _selectedCategory = cat.name;
+              _categoryManuallySelected = true;
+            });
           },
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
@@ -1057,8 +1229,7 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                   cat.name,
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    fontWeight:
-                        isSelected ? FontWeight.w600 : FontWeight.w500,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                     color: isSelected
                         ? cat.color
                         : (isDark
@@ -1086,7 +1257,12 @@ class _AddExpenseScreenState extends State<AddExpenseScreen>
                 firstDate: DateTime(2020),
                 lastDate: DateTime.now().add(const Duration(days: 365)),
               );
-              if (date != null) setState(() => _selectedDate = date);
+              if (date != null) {
+                setState(() {
+                  _selectedDate = date;
+                  _dateManuallySelected = true;
+                });
+              }
             },
             child: Container(
               padding: const EdgeInsets.all(14),

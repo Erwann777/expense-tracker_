@@ -1,32 +1,44 @@
-// Model untuk hasil scan receipt dari Gemini AI
+// Result model for a receipt scan performed by Gemini AI.
 class ReceiptScanResult {
-  /// Jumlah total yang dibayar (null jika tidak ditemukan)
+  /// Total amount paid, or null if it could not be found.
   final double? totalAmount;
 
-  /// Nama merchant/toko
+  /// Merchant or store name.
   final String? merchantName;
 
-  /// Tanggal transaksi (null jika tidak ditemukan)
+  /// ISO 4217 currency code detected on the receipt, if available.
+  final String? currencyCode;
+
+  /// Transaction date, or null if it could not be found.
   final DateTime? transactionDate;
 
-  /// Kategori yang disarankan AI (sesuai dengan kategori di aplikasi)
+  /// AI-suggested category that matches an app category.
   final String? suggestedCategory;
 
-  /// Kepercayaan diri AI terhadap hasil (0.0 - 1.0)
+  /// Model-reported confidence for the result (0.0 to 1.0).
   final double confidence;
 
-  /// Pesan error jika terjadi masalah
+  /// Model-reported confidence for each extracted field.
+  final Map<String, double> fieldConfidence;
+
+  /// Brief explanation for the suggested category.
+  final String? categoryReason;
+
+  /// Error message, if the scan failed.
   final String? errorMessage;
 
-  /// Raw text yang dikenali dari receipt (untuk debugging)
+  /// Raw text returned by the model, for debugging.
   final String? rawText;
 
   const ReceiptScanResult({
     this.totalAmount,
     this.merchantName,
+    this.currencyCode,
     this.transactionDate,
     this.suggestedCategory,
-    this.confidence = 1.0,
+    this.confidence = 0.0,
+    this.fieldConfidence = const {},
+    this.categoryReason,
     this.errorMessage,
     this.rawText,
   });
@@ -35,10 +47,26 @@ class ReceiptScanResult {
   bool get hasAmount => totalAmount != null && totalAmount! > 0;
   bool get isSuccess => !hasError && hasAmount;
 
-  factory ReceiptScanResult.error(String message) => ReceiptScanResult(
-        errorMessage: message,
-        confidence: 0.0,
-      );
+  factory ReceiptScanResult.error(String message) =>
+      ReceiptScanResult(errorMessage: message, confidence: 0.0);
+
+  ReceiptScanResult copyWith({
+    String? suggestedCategory,
+    String? categoryReason,
+  }) {
+    return ReceiptScanResult(
+      totalAmount: totalAmount,
+      merchantName: merchantName,
+      currencyCode: currencyCode,
+      transactionDate: transactionDate,
+      suggestedCategory: suggestedCategory ?? this.suggestedCategory,
+      confidence: confidence,
+      fieldConfidence: fieldConfidence,
+      categoryReason: categoryReason ?? this.categoryReason,
+      errorMessage: errorMessage,
+      rawText: rawText,
+    );
+  }
 
   @override
   String toString() =>
@@ -46,4 +74,3 @@ class ReceiptScanResult {
       'date: $transactionDate, category: $suggestedCategory, '
       'confidence: $confidence)';
 }
-
