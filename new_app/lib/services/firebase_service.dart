@@ -4,7 +4,18 @@ import '../models/expense_model.dart';
 import '../models/savings_goal_model.dart';
 import '../models/recurring_expense_model.dart';
 
-/// Firebase service that handles all Firestore operations with real-time synchronization
+/// Firebase service — semua data user disimpan sebagai subcollection di bawah
+/// users/{userId}/, supaya senang cari dan urus data setiap user.
+///
+/// Struktur Firestore:
+///   users/
+///     {userId}/                  ← profil user
+///       expenses/                ← subcollection expenses user ini
+///         {expenseId}/
+///       savings_goals/           ← subcollection goals user ini
+///         {goalId}/
+///       recurring_expenses/      ← subcollection recurring user ini
+///         {recurringId}/
 class FirebaseService {
   static final FirebaseService instance = FirebaseService._init();
 
@@ -12,11 +23,22 @@ class FirebaseService {
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Collection references
+  // ── Root collections ──────────────────────────────────────────────────────
+
+  /// Koleksi utama users
   CollectionReference get _usersCollection => _firestore.collection('users');
-  CollectionReference get _expensesCollection => _firestore.collection('expenses');
-  CollectionReference get _goalsCollection => _firestore.collection('savings_goals');
-  CollectionReference get _recurringCollection => _firestore.collection('recurring_expenses');
+
+  /// Subcollection expenses di bawah user tertentu
+  CollectionReference _expensesOf(String userId) =>
+      _usersCollection.doc(userId).collection('expenses');
+
+  /// Subcollection savings_goals di bawah user tertentu
+  CollectionReference _goalsOf(String userId) =>
+      _usersCollection.doc(userId).collection('savings_goals');
+
+  /// Subcollection recurring_expenses di bawah user tertentu
+  CollectionReference _recurringOf(String userId) =>
+      _usersCollection.doc(userId).collection('recurring_expenses');
 
   // ─────────────────────────────────────────────────────
   // ── User Operations ──
@@ -71,7 +93,7 @@ class FirebaseService {
     await _usersCollection.doc(user.id).update(user.toMap());
   }
 
-  // Real-time user updates
+  /// Real-time stream untuk profil user
   Stream<UserModel?> getUserStream(String userId) {
     return _usersCollection.doc(userId).snapshots().map((snapshot) {
       if (!snapshot.exists) return null;
@@ -85,7 +107,9 @@ class FirebaseService {
   // ─────────────────────────────────────────────────────
 
   Future<String> createExpense(ExpenseModel expense) async {
-    final docRef = await _expensesCollection.add(expense.toMap());
+    // userId wajib ada untuk tahu subcollection mana nak disimpan
+    final uid = expense.userId;
+    final docRef = await _expensesOf(uid).add(expense.toMap());
     return docRef.id;
   }
 
@@ -94,9 +118,7 @@ class FirebaseService {
     bool showHidden = false,
   }) async {
     try {
-      final snapshot = await _expensesCollection
-          .where('user_id', isEqualTo: userId)
-          .get();
+      final snapshot = await _expensesOf(userId).get();
 
       final list = snapshot.docs
           .map((doc) {
@@ -153,11 +175,11 @@ class FirebaseService {
 
   Future<void> updateExpense(ExpenseModel expense) async {
     if (expense.id == null) return;
-    await _expensesCollection.doc(expense.id).update(expense.toMap());
+    await _expensesOf(expense.userId).doc(expense.id).update(expense.toMap());
   }
 
-  Future<void> deleteExpense(String id) async {
-    await _expensesCollection.doc(id).delete();
+  Future<void> deleteExpense(String expenseId, String userId) async {
+    await _expensesOf(userId).doc(expenseId).delete();
   }
 
   Future<double> getMonthlyTotal(
@@ -268,13 +290,13 @@ class FirebaseService {
     return list.map((e) => e.toMap()).toList();
   }
 
-  // Real-time expense updates
+  /// Real-time stream expenses untuk user ini
   Stream<List<ExpenseModel>> getExpensesStream(
     String userId, {
     bool showHidden = false,
   }) {
-    return _expensesCollection
-        .where('user_id', isEqualTo: userId)
+    return _expensesOf(userId)
+        .orderBy('date', descending: true)
         .snapshots()
         .map((snapshot) {
       final list = snapshot.docs
@@ -284,7 +306,6 @@ class FirebaseService {
           })
           .where((e) => showHidden || !e.isHidden)
           .toList();
-      list.sort((a, b) => b.date.compareTo(a.date));
       return list;
     });
   }
@@ -294,15 +315,13 @@ class FirebaseService {
   // ─────────────────────────────────────────────────────
 
   Future<String> createSavingsGoal(SavingsGoalModel goal) async {
-    final docRef = await _goalsCollection.add(goal.toMap());
+    final docRef = await _goalsOf(goal.userId).add(goal.toMap());
     return docRef.id;
   }
 
   Future<List<SavingsGoalModel>> getSavingsGoals(String userId) async {
     try {
-      final snapshot = await _goalsCollection
-          .where('user_id', isEqualTo: userId)
-          .get();
+      final snapshot = await _goalsOf(userId).get();
 
       final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
@@ -317,19 +336,16 @@ class FirebaseService {
 
   Future<void> updateSavingsGoal(SavingsGoalModel goal) async {
     if (goal.id == null) return;
-    await _goalsCollection.doc(goal.id).update(goal.toMap());
+    await _goalsOf(goal.userId).doc(goal.id).update(goal.toMap());
   }
 
-  Future<void> deleteSavingsGoal(String id) async {
-    await _goalsCollection.doc(id).delete();
+  Future<void> deleteSavingsGoal(String goalId, String userId) async {
+    await _goalsOf(userId).doc(goalId).delete();
   }
 
-  // Real-time goals stream
+  /// Real-time stream savings goals untuk user ini
   Stream<List<SavingsGoalModel>> getSavingsGoalsStream(String userId) {
-    return _goalsCollection
-        .where('user_id', isEqualTo: userId)
-        .snapshots()
-        .map((snapshot) {
+    return _goalsOf(userId).snapshots().map((snapshot) {
       final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return SavingsGoalModel.fromMap({...data, 'id': doc.id});
@@ -344,15 +360,14 @@ class FirebaseService {
   // ─────────────────────────────────────────────────────
 
   Future<String> createRecurringExpense(RecurringExpenseModel recurring) async {
-    final docRef = await _recurringCollection.add(recurring.toMap());
+    final docRef = await _recurringOf(recurring.userId).add(recurring.toMap());
     return docRef.id;
   }
 
-  Future<List<RecurringExpenseModel>> getRecurringExpenses(String userId) async {
+  Future<List<RecurringExpenseModel>> getRecurringExpenses(
+      String userId) async {
     try {
-      final snapshot = await _recurringCollection
-          .where('user_id', isEqualTo: userId)
-          .get();
+      final snapshot = await _recurringOf(userId).get();
 
       final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
@@ -367,19 +382,19 @@ class FirebaseService {
 
   Future<void> updateRecurringExpense(RecurringExpenseModel recurring) async {
     if (recurring.id == null) return;
-    await _recurringCollection.doc(recurring.id).update(recurring.toMap());
+    await _recurringOf(recurring.userId)
+        .doc(recurring.id)
+        .update(recurring.toMap());
   }
 
-  Future<void> deleteRecurringExpense(String id) async {
-    await _recurringCollection.doc(id).delete();
+  Future<void> deleteRecurringExpense(String recurringId, String userId) async {
+    await _recurringOf(userId).doc(recurringId).delete();
   }
 
-  // Real-time recurring expenses stream
-  Stream<List<RecurringExpenseModel>> getRecurringExpensesStream(String userId) {
-    return _recurringCollection
-        .where('user_id', isEqualTo: userId)
-        .snapshots()
-        .map((snapshot) {
+  /// Real-time stream recurring expenses untuk user ini
+  Stream<List<RecurringExpenseModel>> getRecurringExpensesStream(
+      String userId) {
+    return _recurringOf(userId).snapshots().map((snapshot) {
       final list = snapshot.docs.map((doc) {
         final data = doc.data() as Map<String, dynamic>;
         return RecurringExpenseModel.fromMap({...data, 'id': doc.id});
@@ -405,8 +420,8 @@ class FirebaseService {
   }) async {
     if (recurring.id == null) throw Exception('Recurring ID tidak boleh null');
 
-    final expenseRef = _expensesCollection.doc(); // auto-generated ID
-    final recurringRef = _recurringCollection.doc(recurring.id);
+    final expenseRef = _expensesOf(userId).doc(); // auto-generated ID
+    final recurringRef = _recurringOf(userId).doc(recurring.id);
 
     final expense = ExpenseModel(
       userId: userId,
@@ -460,15 +475,15 @@ class FirebaseService {
       for (final entry in chunk) {
         final recurring = entry['recurring'] as RecurringExpenseModel;
         final dueDate = entry['dueDate'] as DateTime;
-        final userId = entry['userId'] as String;
+        final uid = entry['userId'] as String;
 
         if (recurring.id == null) continue;
 
-        final expenseRef = _expensesCollection.doc();
-        final recurringRef = _recurringCollection.doc(recurring.id);
+        final expenseRef = _expensesOf(uid).doc();
+        final recurringRef = _recurringOf(uid).doc(recurring.id);
 
         final expense = ExpenseModel(
-          userId: userId,
+          userId: uid,
           title: recurring.title,
           amount: recurring.amount,
           type: 'expense',

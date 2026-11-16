@@ -1,11 +1,28 @@
 rules_version = '2';
+
+// Struktur baru: users/{userId}/expenses|savings_goals|recurring_expenses
+// Semua data user disimpan sebagai subcollection di bawah users/{userId}/
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Allow all reads and writes for testing
-    // This is temporary - you should implement proper auth later
-    match /{document=**} {
+    // ── Users (profil) ───────────────────────────────────
+    match /users/{userId} {
       allow read, write: if true;
+
+      // ── Expenses subcollection ───────────────────────
+      match /expenses/{expenseId} {
+        allow read, write: if true;
+      }
+
+      // ── Savings Goals subcollection ──────────────────
+      match /savings_goals/{goalId} {
+        allow read, write: if true;
+      }
+
+      // ── Recurring Expenses subcollection ─────────────
+      match /recurring_expenses/{recurringId} {
+        allow read, write: if true;
+      }
     }
   }
 }

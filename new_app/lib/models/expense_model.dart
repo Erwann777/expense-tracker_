@@ -13,6 +13,7 @@ class ExpenseModel {
   final bool isHidden;
   final String? recurringId;
   final String? splitGroupId;
+  final String? goalId;
   final DateTime createdAt;
 
   ExpenseModel({
@@ -28,11 +29,15 @@ class ExpenseModel {
     this.isHidden = false,
     this.recurringId,
     this.splitGroupId,
+    this.goalId,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
 
   bool get isIncome => type == 'income';
   bool get isExpense => type == 'expense';
+  bool get isGoalSaving =>
+      (isIncome && goalId != null && goalId!.isNotEmpty) ||
+      category == 'Goal Savings';
 
   /// toMap() does NOT include 'id' — Firestore uses document ID for that.
   Map<String, dynamic> toMap() {
@@ -48,6 +53,7 @@ class ExpenseModel {
       'is_hidden': isHidden,
       'recurring_id': recurringId,
       'split_group_id': splitGroupId,
+      'goal_id': goalId,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -66,6 +72,7 @@ class ExpenseModel {
       isHidden: ModelParsers.parseBool(map['is_hidden'] ?? map['isHidden'], false),
       recurringId: map['recurring_id']?.toString() ?? map['recurringId']?.toString(),
       splitGroupId: map['split_group_id']?.toString() ?? map['splitGroupId']?.toString(),
+      goalId: map['goal_id']?.toString() ?? map['goalId']?.toString(),
       createdAt: ModelParsers.parseDateTime(map['created_at'] ?? map['createdAt']),
     );
   }
@@ -83,6 +90,7 @@ class ExpenseModel {
     bool? isHidden,
     String? recurringId,
     String? splitGroupId,
+    String? goalId,
     DateTime? createdAt,
   }) {
     return ExpenseModel(
@@ -98,6 +106,7 @@ class ExpenseModel {
       isHidden: isHidden ?? this.isHidden,
       recurringId: recurringId ?? this.recurringId,
       splitGroupId: splitGroupId ?? this.splitGroupId,
+      goalId: goalId ?? this.goalId,
       createdAt: createdAt ?? this.createdAt,
     );
   }

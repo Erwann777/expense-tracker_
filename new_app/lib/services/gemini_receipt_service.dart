@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -156,6 +157,10 @@ Important: Only return the raw JSON. No explanation. No markdown. Just the JSON 
       return ReceiptScanResult.error(
         'No internet connection. Check your network and try again.',
       );
+    } on TimeoutException {
+      return ReceiptScanResult.error(
+        'The request timed out. Your internet may be slow — please try again.',
+      );
     } on http.ClientException catch (e) {
       return ReceiptScanResult.error('Network error: ${e.message}');
     } on FormatException catch (e) {
@@ -174,7 +179,7 @@ Important: Only return the raw JSON. No explanation. No markdown. Just the JSON 
     for (var attempt = 1; ; attempt++) {
       final response = await http
           .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
-          .timeout(const Duration(seconds: 30));
+          .timeout(const Duration(seconds: 60));
 
       if (!_isOverloaded(response) || attempt >= 3) return response;
       await Future.delayed(Duration(seconds: 2 * attempt));

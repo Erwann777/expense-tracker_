@@ -14,6 +14,7 @@ import '../../providers/currency_provider.dart';
 import '../../widgets/progress_ring.dart';
 import '../../widgets/sparkline_chart.dart';
 import '../expenses/add_expense_screen.dart';
+import '../advisor/ai_budget_advisor_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -52,8 +53,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           final budget = user.monthlyBudget;
           final spent = expenses.monthlyTotal;
           final income = expenses.monthlyIncomeTotal;
-          final remaining = (budget - spent).clamp(0.0, double.infinity);
-          final progress = budget > 0 ? (spent / budget).clamp(0.0, 1.0) : 0.0;
+          final spentConverted = cp.convert(spent);
+          final remaining = (budget - spentConverted).clamp(0.0, double.infinity);
+          final progress = budget > 0 ? (spentConverted / budget).clamp(0.0, 1.0) : 0.0;
           final trend = expenses.spendingTrend;
           final momChange = expenses.monthOverMonthChange;
 
@@ -73,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   physics: const ClampingScrollPhysics(),
                   slivers: [
                     SliverToBoxAdapter(child: _buildIncomeExpenseSummary(context, cp, spent, income, isDark)),
-                    SliverToBoxAdapter(child: _buildBudgetRing(context, cp, spent, budget, remaining, progress, ringColor, statusEmoji, isDark)),
+                    SliverToBoxAdapter(child: _buildBudgetRing(context, cp, spentConverted, budget, remaining, progress, ringColor, statusEmoji, isDark)),
                     SliverToBoxAdapter(child: _buildSparklineSection(context, expenses, currency, momChange, trend, isDark)),
                     SliverToBoxAdapter(child: _buildSmartInsight(context, trend, remaining, budget, cp, isDark)),
                     SliverToBoxAdapter(child: _buildQuickActions(context, isDark)),
@@ -205,38 +207,95 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildBudgetRing(BuildContext ctx, CurrencyProvider cp, double spent, double budget, double remaining, double progress, Color ringColor, String emoji, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: isDark ? AppTheme.neumorphicDecoration(isDark: true) : AppTheme.glassDecoration(),
-        child: Row(children: [
-          AnimatedProgressRing(
-            progress: progress,
-            size: 130,
-            strokeWidth: 14,
-            progressColor: ringColor,
-            gradient: LinearGradient(colors: [ringColor, ringColor.withValues(alpha: 0.6)]),
-            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Text(emoji, style: const TextStyle(fontSize: 22)),
-              const SizedBox(height: 2),
-              Text('${(progress * 100).toStringAsFixed(0)}%', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w800, color: isDark ? AppTheme.darkText : AppTheme.textPrimary)),
-              Text('used', style: GoogleFonts.inter(fontSize: 11, color: isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted)),
-            ]),
+Widget _buildBudgetRing(
+  BuildContext ctx,
+  CurrencyProvider cp,
+  double spent,
+  double budget,
+  double remaining,
+  double progress,
+  Color ringColor,
+  String emoji,
+  bool isDark,
+) {
+  return Padding(
+    padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: isDark
+          ? AppTheme.neumorphicDecoration(isDark: true)
+          : AppTheme.glassDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Budget Overview',
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
+            ),
           ),
-          const SizedBox(width: 24),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _miniStat('Budget', cp.formatCompact(budget), AppTheme.accentBlue, isDark),
-            const SizedBox(height: 14),
-            _miniStat('Spent', cp.formatCompact(spent), AppTheme.accentPurple, isDark),
-            const SizedBox(height: 14),
-            _miniStat('Remaining', cp.formatCompact(remaining), AppTheme.accentGreen, isDark),
-          ])),
-        ]),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              AnimatedProgressRing(
+                progress: progress,
+                size: 130,
+                strokeWidth: 14,
+                progressColor: ringColor,
+                gradient: LinearGradient(
+                  colors: [ringColor, ringColor.withValues(alpha: 0.6)],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(emoji, style: const TextStyle(fontSize: 22)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${(progress * 100).toStringAsFixed(0)}%',
+                      style: GoogleFonts.inter(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      'used',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _miniStat('Budget', cp.formatCompactDisplay(budget),
+                        AppTheme.accentBlue, isDark),
+                    const SizedBox(height: 14),
+                    _miniStat('Spent', cp.formatCompactDisplay(spent),
+                        AppTheme.accentPurple, isDark),
+                    const SizedBox(height: 14),
+                    _miniStat('Remaining', cp.formatCompactDisplay(remaining),
+                        AppTheme.accentGreen, isDark),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _miniStat(String label, String value, Color color, bool isDark) {
     return Row(children: [
@@ -285,9 +344,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final daysLeft = DateTime(DateTime.now().year, DateTime.now().month + 1, 0).day - DateTime.now().day;
     final dailyBudget = daysLeft > 0 ? remaining / daysLeft : 0.0;
     String msg; IconData icon; Color color;
-    if (direction == 'increasing') { msg = 'Spending is trending up. Try to limit to ${cp.format(dailyBudget)}/day'; icon = Icons.trending_up_rounded; color = AppTheme.accentOrange; }
+    if (direction == 'increasing') { msg = 'Spending is trending up. Try to limit to ${cp.formatDisplay(dailyBudget)}/day'; icon = Icons.trending_up_rounded; color = AppTheme.accentOrange; }
     else if (direction == 'decreasing') { msg = 'Great job! Spending is going down 🎉'; icon = Icons.trending_down_rounded; color = AppTheme.accentGreen; }
-    else { msg = 'You can spend ${cp.format(dailyBudget)}/day for the rest of the month'; icon = Icons.lightbulb_rounded; color = AppTheme.accentBlue; }
+    else { msg = 'You can spend ${cp.formatDisplay(dailyBudget)}/day for the rest of the month'; icon = Icons.lightbulb_rounded; color = AppTheme.accentBlue; }
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
@@ -306,13 +365,73 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget _buildQuickActions(BuildContext context, bool isDark) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      child: Row(children: [
-        Expanded(child: _actionChip(context, 'Add Expense', Icons.remove_rounded, AppTheme.cardGradient,
-          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddExpenseScreen())))),
-        const SizedBox(width: 12),
-        Expanded(child: _actionChip(context, 'Add Income', Icons.add_rounded, AppTheme.greenGradient,
-          () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddExpenseScreen(isIncome: true))))),
-      ]),
+      child: Column(
+        children: [
+          Row(children: [
+            Expanded(child: _actionChip(context, 'Add Expense', Icons.remove_rounded, AppTheme.cardGradient,
+              () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddExpenseScreen())))),
+            const SizedBox(width: 12),
+            Expanded(child: _actionChip(context, 'Add Income', Icons.add_rounded, AppTheme.greenGradient,
+              () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AddExpenseScreen(isIncome: true))))),
+          ]),
+          const SizedBox(height: 10),
+          // AI Budget Advisor banner
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiBudgetAdvisorScreen()),
+              );
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF7C3AED), Color(0xFF6366F1)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.accentPurple.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.auto_awesome_rounded, color: Colors.white, size: 18),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI Budget Advisor',
+                          style: GoogleFonts.inter(
+                            fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: Colors.white, size: 20),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

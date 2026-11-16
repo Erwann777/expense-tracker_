@@ -319,8 +319,9 @@ class ExpenseProvider with ChangeNotifier {
   }
 
   Future<bool> deleteExpense(String id) async {
+    if (_userId == null) return false;
     try {
-      await FirebaseService.instance.deleteExpense(id);
+      await FirebaseService.instance.deleteExpense(id, _userId!);
       return true;
     } catch (e) {
       debugPrint('Error deleting expense: $e');
@@ -341,8 +342,9 @@ class ExpenseProvider with ChangeNotifier {
   }
 
   Future<bool> deleteRecurringExpense(String id) async {
+    if (_userId == null) return false;
     try {
-      await FirebaseService.instance.deleteRecurringExpense(id);
+      await FirebaseService.instance.deleteRecurringExpense(id, _userId!);
       return true;
     } catch (e) {
       debugPrint('Error deleting recurring: $e');

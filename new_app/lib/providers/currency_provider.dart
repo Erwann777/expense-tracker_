@@ -119,6 +119,42 @@ class CurrencyProvider with ChangeNotifier {
     return Formatters.currencyCompact(converted, _displayCurrency);
   }
 
+  /// Format amount yang SUDAH dalam displayCurrency (tanpa konversi ulang).
+  String formatDisplay(double amount) {
+    return Formatters.currency(amount, _displayCurrency);
+  }
+
+  /// Format compact amount yang SUDAH dalam displayCurrency (tanpa konversi ulang).
+  String formatCompactDisplay(double amount) {
+    return Formatters.currencyCompact(amount, _displayCurrency);
+  }
+
+  /// Convert an amount from [fromCode] to [toCode] using live USD rates.
+  /// If rates are not fetched yet, it fetches them first.
+  Future<double> convertBetween(
+    double amount,
+    String fromCode,
+    String toCode,
+  ) async {
+    final from = fromCode.toUpperCase();
+    final to = toCode.toUpperCase();
+    if (from == to || amount == 0) return amount;
+
+    if (_usdRates.isEmpty) {
+      await _fetchUsdRates();
+    }
+    if (_usdRates.isEmpty) {
+      final rates = await CurrencyService.fetchRates('USD');
+      if (rates.isNotEmpty) {
+        _usdRates = rates;
+      }
+    }
+
+    if (_usdRates.isEmpty) return amount;
+
+    return CurrencyService.convertWithRates(amount, from, to, _usdRates);
+  }
+
   /// Simbol mata uang yang ditampilkan saat ini
   String get displaySymbol {
     return AppCurrencies.getByCode(_displayCurrency).symbol;

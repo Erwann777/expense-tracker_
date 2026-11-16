@@ -16,6 +16,7 @@ import '../../models/currency_model.dart';
 import '../../utils/app_theme.dart';
 import '../auth/login_screen.dart';
 import '../auth/pin_setup_screen.dart';
+import '../advisor/ai_budget_advisor_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -113,6 +114,24 @@ class SettingsScreen extends StatelessWidget {
                           title: 'Avatar Emoji',
                           subtitle: user.avatarEmoji ?? 'Tap to set',
                           onTap: () => _showAvatarPicker(context),
+                          isDark: isDark,
+                        ),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _buildSectionLabel('AI Features', isDark),
+                      ),
+                      SliverToBoxAdapter(
+                        child: _buildSettingsTile(
+                          context,
+                          icon: Icons.auto_awesome_rounded,
+                          color: AppTheme.accentPurple,
+                          title: 'AI Budget Advisor',
+                          subtitle: 'Get personalised tips powered by Groq AI',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AiBudgetAdvisorScreen(),
+                            ),
+                          ),
                           isDark: isDark,
                         ),
                       ),
@@ -676,9 +695,11 @@ class SettingsScreen extends StatelessWidget {
                 return;
               }
               final pinAuth = context.read<PinAuthProvider>();
+              final authProv = context.read<AuthProvider>();
               final ok = await pinAuth.changePin(
                 oldPinCtrl.text,
                 newPinCtrl.text,
+                authProvider: authProv,
               );
               if (ok && context.mounted) {
                 Navigator.pop(ctx);
@@ -1010,10 +1031,33 @@ class SettingsScreen extends StatelessWidget {
                   final isSelected = auth.currentUser?.currency == curr.code;
                   return GestureDetector(
                     onTap: () async {
-                      auth.updateCurrency(curr.code);
-                      context.read<ExpenseProvider>().loadExpenses();
-                      // Update live exchange rates
-                      await context.read<CurrencyProvider>().changeDisplayCurrency(curr.code);
+                      final oldCurrency = auth.currentUser?.currency ?? 'USD';
+                      final oldBudget = auth.currentUser?.monthlyBudget ?? 0.0;
+                      final newCurrency = curr.code;
+
+                      if (oldCurrency != newCurrency) {
+                        double newBudget = oldBudget;
+                        if (oldBudget > 0) {
+                          final converted = await context
+                              .read<CurrencyProvider>()
+                              .convertBetween(oldBudget, oldCurrency, newCurrency);
+                          newBudget = converted.roundToDouble();
+                        }
+
+                        await auth.updateCurrencyAndBudget(
+                          currency: newCurrency,
+                          budget: newBudget,
+                        );
+
+                        if (context.mounted) {
+                          context.read<ExpenseProvider>().loadExpenses();
+                          // Update live exchange rates
+                          await context
+                              .read<CurrencyProvider>()
+                              .changeDisplayCurrency(newCurrency);
+                        }
+                      }
+
                       if (ctx.mounted) Navigator.pop(ctx);
                     },
                     child: Container(

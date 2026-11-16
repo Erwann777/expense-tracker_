@@ -74,6 +74,15 @@ class PinAuthService {
     return sha256.convert(bytes).toString();
   }
 
+  /// Public accessor so providers can read the hash without duplicating logic.
+  String hashPin(String pin) => _hashPin(pin);
+
+  /// Restore a PIN hash from Firebase (e.g. after login on new device).
+  Future<void> restorePinHash(String hash) async {
+    await _write(await _key(_baseKeyPinHash), hash);
+    await _write(await _key(_baseKeyPinSet), 'true');
+  }
+
   /// Check if PIN has been set up.
   Future<bool> isPinSet() async {
     final val = await _read(await _key(_baseKeyPinSet));

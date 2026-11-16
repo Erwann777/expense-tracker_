@@ -113,8 +113,9 @@ class RecurringProvider with ChangeNotifier {
   }
 
   Future<bool> deleteRecurring(String id) async {
+    if (_userId == null) return false;
     try {
-      await FirebaseService.instance.deleteRecurringExpense(id);
+      await FirebaseService.instance.deleteRecurringExpense(id, _userId!);
       return true;
     } catch (e) {
       debugPrint('Error deleting recurring expense: $e');

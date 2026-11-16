@@ -122,6 +122,21 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Update both currency and monthly budget in a single atomic Firestore update.
+  Future<void> updateCurrencyAndBudget({
+    required String currency,
+    required double budget,
+  }) async {
+    if (_currentUser == null) return;
+    final updated = _currentUser!.copyWith(
+      currency: currency,
+      monthlyBudget: budget,
+    );
+    _currentUser = updated;
+    await FirebaseService.instance.updateUser(updated);
+    notifyListeners();
+  }
+
   Future<void> updateBudget(double budget) async {
     if (_currentUser == null) return;
     final updated = _currentUser!.copyWith(monthlyBudget: budget);
@@ -141,6 +156,15 @@ class AuthProvider with ChangeNotifier {
   Future<void> updateAvatar(String emoji) async {
     if (_currentUser == null) return;
     final updated = _currentUser!.copyWith(avatarEmoji: emoji);
+    _currentUser = updated;
+    await FirebaseService.instance.updateUser(updated);
+    notifyListeners();
+  }
+
+  /// Sync PIN hash to Firebase. Pass null to clear the PIN from cloud.
+  Future<void> updatePin(String? pinHash) async {
+    if (_currentUser == null) return;
+    final updated = _currentUser!.copyWith(pin: pinHash);
     _currentUser = updated;
     await FirebaseService.instance.updateUser(updated);
     notifyListeners();

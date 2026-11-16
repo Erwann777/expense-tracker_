@@ -112,8 +112,9 @@ class GoalsProvider with ChangeNotifier {
   }
 
   Future<bool> deleteGoal(String id) async {
+    if (_userId == null) return false;
     try {
-      await FirebaseService.instance.deleteSavingsGoal(id);
+      await FirebaseService.instance.deleteSavingsGoal(id, _userId!);
       return true;
     } catch (e) {
       debugPrint('Error deleting goal: $e');

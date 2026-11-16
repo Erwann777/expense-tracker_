@@ -11,6 +11,7 @@ import '../../utils/formatters.dart';
 
 import '../../providers/currency_provider.dart';
 import '../../utils/pdf_report_generator.dart';
+import '../advisor/ai_budget_advisor_screen.dart';
 
 class MonthlyReportScreen extends StatefulWidget {
   const MonthlyReportScreen({super.key});
@@ -70,22 +71,37 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
     try {
       final auth = context.read<AuthProvider>();
       final exp = context.read<ExpenseProvider>();
+      final cp = context.read<CurrencyProvider>();
+      final rate = cp.conversionRate;
       await PdfReportGenerator.generateAndShare(
         userName: auth.currentUser?.displayName ?? 'User',
         currency: auth.currentUser?.currency ?? 'USD',
         startDate: _rangeStart,
         endDate: _rangeEnd,
-        totalExpense: exp.rangeExpenseTotal,
-        totalIncome: exp.rangeIncomeTotal,
-        expenseCategoryTotals: exp.rangeCategoryTotals,
-        incomeCategoryTotals: exp.rangeIncomeCategoryTotals,
-        transactions: exp.rangeExpenses,
+        totalExpense: exp.rangeExpenseTotal * rate,
+        totalIncome: exp.rangeIncomeTotal * rate,
+        expenseCategoryTotals: exp.rangeCategoryTotals.map((k, v) => MapEntry(k, v * rate)),
+        incomeCategoryTotals: exp.rangeIncomeCategoryTotals.map((k, v) => MapEntry(k, v * rate)),
+        transactions: exp.rangeExpenses.map((e) => e.copyWith(amount: e.amount * rate)).toList(),
         budget: auth.currentUser?.monthlyBudget,
       );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('PDF Report generated successfully! 🎉'),
+            backgroundColor: AppTheme.accentGreen,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error generating PDF: $e'), backgroundColor: AppTheme.errorRed),
+          SnackBar(
+            content: Text('Error generating PDF: $e'),
+            backgroundColor: AppTheme.errorRed,
+            behavior: SnackBarBehavior.floating,
+          ),
         );
       }
     }
@@ -416,7 +432,7 @@ class _MonthlyReportScreenState extends State<MonthlyReportScreen> {
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
-                        'Budget: ${cp.format((budget - spent).clamp(0, double.infinity).toDouble())} remaining',
+                        'Budget: ${cp.formatDisplay((budget - cp.convert(spent)).clamp(0, double.infinity).toDouble())} remaining',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,

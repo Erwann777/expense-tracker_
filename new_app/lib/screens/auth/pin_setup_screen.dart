@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../providers/pin_auth_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../utils/app_theme.dart';
 
 /// Screen shown on first launch to set up a PIN.
@@ -95,7 +96,8 @@ class _PinSetupScreenState extends State<PinSetupScreen>
     }
 
     final provider = context.read<PinAuthProvider>();
-    final backupCode = await provider.setupPin(_pin);
+    final authProvider = context.read<AuthProvider>();
+    final backupCode = await provider.setupPin(_pin, authProvider: authProvider);
 
     if (mounted) {
       _showBackupCodeDialog(backupCode);

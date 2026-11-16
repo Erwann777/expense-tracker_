@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import '../services/pin_auth_service.dart';
+import 'auth_provider.dart';
 
 /// Provider that manages the PIN/biometric authentication state.
+/// PIN hash is stored locally (SharedPreferences/SecureStorage) AND
+/// synced to Firebase Firestore (`users/{userId}.pin`) so it can be
+/// restored on a new device after login.
 class PinAuthProvider with ChangeNotifier {
   final PinAuthService _service = PinAuthService();
 
@@ -24,12 +28,24 @@ class PinAuthProvider with ChangeNotifier {
 
   PinAuthService get service => _service;
 
-  /// Initialize the provider – load all stored state.
-  Future<void> init() async {
+  /// Initialize the provider — load stored state.
+  /// Pass [authUser] from [AuthProvider] so the PIN can be restored
+  /// from Firebase when it isn't available locally (e.g. fresh install).
+  Future<void> init({AuthProvider? authProvider}) async {
     _isLoading = true;
     notifyListeners();
 
     _isPinSet = await _service.isPinSet();
+
+    // Restore PIN hash from Firebase if not stored locally
+    if (!_isPinSet) {
+      final cloudPin = authProvider?.currentUser?.pin;
+      if (cloudPin != null && cloudPin.isNotEmpty) {
+        await _service.restorePinHash(cloudPin);
+        _isPinSet = true;
+      }
+    }
+
     _failedAttempts = await _service.getFailedAttempts();
     _remainingLockout = await _service.getRemainingLockout();
 
@@ -38,10 +54,13 @@ class PinAuthProvider with ChangeNotifier {
   }
 
   /// Set a new PIN. Returns the backup code.
-  Future<String> setupPin(String pin) async {
+  /// Pass [authProvider] to also sync the PIN hash to Firebase.
+  Future<String> setupPin(String pin, {AuthProvider? authProvider}) async {
     final backupCode = await _service.setPin(pin);
     _isPinSet = true;
     _error = null;
+    // Sync to Firebase
+    await authProvider?.updatePin(_service.hashPin(pin));
     notifyListeners();
     return backupCode;
   }
@@ -69,7 +88,8 @@ class PinAuthProvider with ChangeNotifier {
     } else {
       final remaining = PinAuthService.maxFailedAttempts - _failedAttempts;
       if (remaining > 0) {
-        _error = 'Incorrect PIN. $remaining attempt${remaining == 1 ? '' : 's'} remaining.';
+        _error =
+            'Incorrect PIN. $remaining attempt${remaining == 1 ? '' : 's'} remaining.';
       } else {
         _error = 'Too many attempts. Try again later.';
       }
@@ -79,28 +99,40 @@ class PinAuthProvider with ChangeNotifier {
     return result;
   }
 
-
-
   /// Change PIN (requires old PIN).
-  Future<bool> changePin(String oldPin, String newPin) async {
+  /// Pass [authProvider] to also sync the new PIN hash to Firebase.
+  Future<bool> changePin(
+    String oldPin,
+    String newPin, {
+    AuthProvider? authProvider,
+  }) async {
     final result = await _service.changePin(oldPin, newPin);
     if (!result) {
       _error = 'Current PIN is incorrect.';
     } else {
       _error = null;
+      // Sync new hash to Firebase
+      await authProvider?.updatePin(_service.hashPin(newPin));
     }
     notifyListeners();
     return result;
   }
 
   /// Reset PIN using backup code. Returns new backup code.
-  Future<String?> resetPinWithBackup(String backupCode, String newPin) async {
+  /// Pass [authProvider] to also sync the new PIN hash to Firebase.
+  Future<String?> resetPinWithBackup(
+    String backupCode,
+    String newPin, {
+    AuthProvider? authProvider,
+  }) async {
     final newCode = await _service.resetPinWithBackup(backupCode, newPin);
     if (newCode != null) {
       _isAuthenticated = true;
       _failedAttempts = 0;
       _remainingLockout = null;
       _error = null;
+      // Sync new hash to Firebase
+      await authProvider?.updatePin(_service.hashPin(newPin));
     } else {
       _error = 'Invalid backup code.';
     }
@@ -114,8 +146,10 @@ class PinAuthProvider with ChangeNotifier {
   }
 
   /// Clear PIN and all auth data (for "forgot PIN - clear data" flow).
-  Future<void> clearAllAuthData() async {
+  /// Pass [authProvider] to also clear the PIN from Firebase.
+  Future<void> clearAllAuthData({AuthProvider? authProvider}) async {
     await _service.clearAllData();
+    await authProvider?.updatePin(null); // remove from Firebase
     _isPinSet = false;
     _isAuthenticated = false;
     _failedAttempts = 0;
@@ -135,7 +169,8 @@ class PinAuthProvider with ChangeNotifier {
   Future<void> refreshLockout() async {
     _remainingLockout = await _service.getRemainingLockout();
     _failedAttempts = await _service.getFailedAttempts();
-    if (!isLockedOut && _failedAttempts >= PinAuthService.maxFailedAttempts) {
+    if (!isLockedOut &&
+        _failedAttempts >= PinAuthService.maxFailedAttempts) {
       _failedAttempts = 0;
     }
     notifyListeners();
@@ -146,4 +181,4 @@ class PinAuthProvider with ChangeNotifier {
     notifyListeners();
   }
 }
-// updated: 2026-09-23
+// updated: 2026-11-13

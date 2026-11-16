@@ -135,9 +135,11 @@ class _ForgotPinScreenState extends State<ForgotPinScreen>
     setState(() => _isProcessing = true);
 
     final provider = context.read<PinAuthProvider>();
+    final authProvider = context.read<AuthProvider>();
     final newBackupCode = await provider.resetPinWithBackup(
       _backupCodeController.text,
       _newPin,
+      authProvider: authProvider,
     );
 
     if (newBackupCode != null && mounted) {
@@ -368,7 +370,8 @@ class _ForgotPinScreenState extends State<ForgotPinScreen>
   Future<void> _performClearData() async {
     // Clear PIN data
     final pinProvider = context.read<PinAuthProvider>();
-    await pinProvider.clearAllAuthData();
+    final authProvider = context.read<AuthProvider>();
+    await pinProvider.clearAllAuthData(authProvider: authProvider);
 
     // Clear shared preferences
     final prefs = await SharedPreferences.getInstance();

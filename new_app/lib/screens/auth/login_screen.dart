@@ -64,7 +64,8 @@ class _LoginScreenState extends State<LoginScreen>
     );
     if (success && mounted) {
       final pinAuth = context.read<PinAuthProvider>();
-      await pinAuth.init();
+      final authProvider = context.read<AuthProvider>();
+      await pinAuth.init(authProvider: authProvider);
       if (!mounted) return;
 
       Widget nextScreen;
