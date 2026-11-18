@@ -235,7 +235,7 @@ class _ExpenseListScreenState extends State<ExpenseListScreen> {
               actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                 ElevatedButton(onPressed: () => Navigator.pop(ctx, true), style: ElevatedButton.styleFrom(backgroundColor: AppTheme.errorRed), child: const Text('Delete'))],
             )),
-            onDismissed: (_) { exp.deleteExpense(expense.id!);
+            onDismissed: (_) { exp.deleteExpense(expense.id!, isIncome: expense.isIncome);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${expense.title} deleted'), backgroundColor: AppTheme.errorRed)); },
             child: GestureDetector(
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AddExpenseScreen(expense: expense, isIncome: expense.isIncome))),

@@ -10,8 +10,10 @@ import '../models/recurring_expense_model.dart';
 /// Struktur Firestore:
 ///   users/
 ///     {userId}/                  ← profil user
-///       expenses/                ← subcollection expenses user ini
+///       expenses/                ← subcollection expenses (type=expense) sahaja
 ///         {expenseId}/
+///       income/                  ← subcollection income (type=income) sahaja
+///         {incomeId}/
 ///       savings_goals/           ← subcollection goals user ini
 ///         {goalId}/
 ///       recurring_expenses/      ← subcollection recurring user ini
@@ -28,9 +30,13 @@ class FirebaseService {
   /// Koleksi utama users
   CollectionReference get _usersCollection => _firestore.collection('users');
 
-  /// Subcollection expenses di bawah user tertentu
+  /// Subcollection expenses (type=expense) di bawah user tertentu
   CollectionReference _expensesOf(String userId) =>
       _usersCollection.doc(userId).collection('expenses');
+
+  /// Subcollection income (type=income) di bawah user tertentu
+  CollectionReference _incomeOf(String userId) =>
+      _usersCollection.doc(userId).collection('income');
 
   /// Subcollection savings_goals di bawah user tertentu
   CollectionReference _goalsOf(String userId) =>
@@ -107,9 +113,10 @@ class FirebaseService {
   // ─────────────────────────────────────────────────────
 
   Future<String> createExpense(ExpenseModel expense) async {
-    // userId wajib ada untuk tahu subcollection mana nak disimpan
+    // Simpan ke collection yang betul bergantung pada type
     final uid = expense.userId;
-    final docRef = await _expensesOf(uid).add(expense.toMap());
+    final col = expense.isIncome ? _incomeOf(uid) : _expensesOf(uid);
+    final docRef = await col.add(expense.toMap());
     return docRef.id;
   }
 
@@ -118,15 +125,20 @@ class FirebaseService {
     bool showHidden = false,
   }) async {
     try {
-      final snapshot = await _expensesOf(userId).get();
+      // Ambil dari kedua-dua collection dan gabungkan
+      final expSnap = await _expensesOf(userId).get();
+      final incSnap = await _incomeOf(userId).get();
 
-      final list = snapshot.docs
-          .map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            return ExpenseModel.fromMap({...data, 'id': doc.id});
-          })
-          .where((e) => showHidden || !e.isHidden)
-          .toList();
+      final list = [
+        ...expSnap.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return ExpenseModel.fromMap({...data, 'id': doc.id, 'type': 'expense'});
+        }),
+        ...incSnap.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return ExpenseModel.fromMap({...data, 'id': doc.id, 'type': 'income'});
+        }),
+      ].where((e) => showHidden || !e.isHidden).toList();
 
       list.sort((a, b) => b.date.compareTo(a.date));
       return list;
@@ -175,11 +187,14 @@ class FirebaseService {
 
   Future<void> updateExpense(ExpenseModel expense) async {
     if (expense.id == null) return;
-    await _expensesOf(expense.userId).doc(expense.id).update(expense.toMap());
+    // Update dalam collection yang betul
+    final col = expense.isIncome ? _incomeOf(expense.userId) : _expensesOf(expense.userId);
+    await col.doc(expense.id).update(expense.toMap());
   }
 
-  Future<void> deleteExpense(String expenseId, String userId) async {
-    await _expensesOf(userId).doc(expenseId).delete();
+  Future<void> deleteExpense(String expenseId, String userId, {bool isIncome = false}) async {
+    final col = isIncome ? _incomeOf(userId) : _expensesOf(userId);
+    await col.doc(expenseId).delete();
   }
 
   Future<double> getMonthlyTotal(
@@ -290,7 +305,163 @@ class FirebaseService {
     return list.map((e) => e.toMap()).toList();
   }
 
-  /// Real-time stream expenses untuk user ini
+  // ─────────────────────────────────────────────────────
+  // ── Migration: expenses → split expenses / income ──
+  // ─────────────────────────────────────────────────────
+
+  /// Kira berapa banyak dokumen dengan type='income' masih ada
+  /// dalam collection 'expenses/' untuk SATU user (data lama).
+  Future<int> countOldIncomeInExpenses(String userId) async {
+    final expSnap = await _expensesOf(userId).get();
+    return expSnap.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return (data['type'] as String?) == 'income';
+    }).length;
+  }
+
+  /// Kira jumlah income lama untuk SEMUA user.
+  /// Returns map {totalUsers, totalIncomeDocs}.
+  Future<Map<String, int>> countAllUsersOldIncome() async {
+    final usersSnap = await _usersCollection.get();
+    int totalIncome = 0;
+    int usersWithIncome = 0;
+
+    for (final userDoc in usersSnap.docs) {
+      final count = await countOldIncomeInExpenses(userDoc.id);
+      if (count > 0) {
+        usersWithIncome++;
+        totalIncome += count;
+      }
+    }
+
+    return {
+      'totalUsers': usersSnap.docs.length,
+      'usersWithIncome': usersWithIncome,
+      'totalIncomeDocs': totalIncome,
+    };
+  }
+
+  /// Migrate data lama untuk SATU user:
+  /// semua dokumen dengan type='income' di dalam 'expenses/' → 'income/'.
+  /// Selamat dijalankan berulang kali (idempotent).
+  Future<MigrationResult> migrateIncomeToSeparateCollection(
+    String userId, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final expSnap = await _expensesOf(userId).get();
+    final incomeDocs = expSnap.docs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return (data['type'] as String?) == 'income';
+    }).toList();
+
+    if (incomeDocs.isEmpty) {
+      return MigrationResult(migrated: 0, failed: 0, skipped: 0);
+    }
+
+    int migrated = 0;
+    int failed = 0;
+    int done = 0;
+    final total = incomeDocs.length;
+
+    // Tiap dokumen = 2 ops (set + delete) → selamat 200 doc/batch (< 500 limit)
+    const chunkSize = 200;
+
+    for (int start = 0; start < incomeDocs.length; start += chunkSize) {
+      final chunk = incomeDocs.sublist(
+        start,
+        (start + chunkSize).clamp(0, incomeDocs.length),
+      );
+
+      final batch = _firestore.batch();
+      int chunkValid = 0;
+
+      for (final doc in chunk) {
+        final data = doc.data() as Map<String, dynamic>;
+        final enriched = {...data, 'type': 'income'};
+        batch.set(_incomeOf(userId).doc(doc.id), enriched);
+        batch.delete(_expensesOf(userId).doc(doc.id));
+        chunkValid++;
+      }
+
+      try {
+        await batch.commit();
+        migrated += chunkValid;
+      } catch (e) {
+        failed += chunkValid;
+      }
+
+      done += chunk.length;
+      onProgress?.call(done, total);
+    }
+
+    return MigrationResult(migrated: migrated, failed: failed, skipped: 0);
+  }
+
+  /// Migrate data lama untuk SEMUA user sekaligus.
+  ///
+  /// [onUserProgress] dipanggil setiap kali seorang user selesai:
+  ///   - usersDone  : berapa user yang telah diproses
+  ///   - usersTotal : jumlah user keseluruhan
+  ///   - userId     : ID user yang baru selesai
+  ///   - userResult : result migration untuk user tersebut
+  ///
+  /// Returns [GlobalMigrationResult] dengan statistik keseluruhan.
+  Future<GlobalMigrationResult> migrateAllUsersIncome({
+    void Function(
+      int usersDone,
+      int usersTotal,
+      String userId,
+      MigrationResult userResult,
+    )? onUserProgress,
+  }) async {
+    // Ambil semua user IDs
+    final usersSnap = await _usersCollection.get();
+    final allUserIds = usersSnap.docs.map((d) => d.id).toList();
+
+    int totalMigrated = 0;
+    int totalFailed = 0;
+    int totalSkipped = 0;
+    int usersProcessed = 0;
+    int usersWithData = 0;
+    final List<String> failedUsers = [];
+
+    for (final userId in allUserIds) {
+      try {
+        final result = await migrateIncomeToSeparateCollection(userId);
+
+        totalMigrated += result.migrated;
+        totalFailed += result.failed;
+        totalSkipped += result.skipped;
+
+        if (result.total > 0) usersWithData++;
+        if (result.failed > 0) failedUsers.add(userId);
+
+        usersProcessed++;
+        onUserProgress?.call(usersProcessed, allUserIds.length, userId, result);
+      } catch (e) {
+        totalFailed++;
+        failedUsers.add(userId);
+        usersProcessed++;
+        onUserProgress?.call(
+          usersProcessed,
+          allUserIds.length,
+          userId,
+          MigrationResult(migrated: 0, failed: 1, skipped: 0),
+        );
+      }
+    }
+
+    return GlobalMigrationResult(
+      totalUsers: allUserIds.length,
+      usersWithData: usersWithData,
+      totalMigrated: totalMigrated,
+      totalFailed: totalFailed,
+      totalSkipped: totalSkipped,
+      failedUserIds: failedUsers,
+    );
+  }
+
+  /// Real-time stream — expenses sahaja (type=expense)
   Stream<List<ExpenseModel>> getExpensesStream(
     String userId, {
     bool showHidden = false,
@@ -302,7 +473,27 @@ class FirebaseService {
       final list = snapshot.docs
           .map((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            return ExpenseModel.fromMap({...data, 'id': doc.id});
+            return ExpenseModel.fromMap({...data, 'id': doc.id, 'type': 'expense'});
+          })
+          .where((e) => showHidden || !e.isHidden)
+          .toList();
+      return list;
+    });
+  }
+
+  /// Real-time stream untuk income sahaja (type=income)
+  Stream<List<ExpenseModel>> getIncomeStream(
+    String userId, {
+    bool showHidden = false,
+  }) {
+    return _incomeOf(userId)
+        .orderBy('date', descending: true)
+        .snapshots()
+        .map((snapshot) {
+      final list = snapshot.docs
+          .map((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            return ExpenseModel.fromMap({...data, 'id': doc.id, 'type': 'income'});
           })
           .where((e) => showHidden || !e.isHidden)
           .toList();
@@ -505,4 +696,51 @@ class FirebaseService {
 
     return created;
   }
+}
+
+/// Hasil operasi migrasi data income
+class MigrationResult {
+  final int migrated;
+  final int failed;
+  final int skipped;
+
+  const MigrationResult({
+    required this.migrated,
+    required this.failed,
+    required this.skipped,
+  });
+
+  bool get isSuccess => failed == 0;
+  int get total => migrated + failed + skipped;
+
+  @override
+  String toString() =>
+      'MigrationResult(migrated: $migrated, failed: $failed, skipped: $skipped)';
+}
+
+/// Hasil migrasi untuk SEMUA user
+class GlobalMigrationResult {
+  final int totalUsers;
+  final int usersWithData;
+  final int totalMigrated;
+  final int totalFailed;
+  final int totalSkipped;
+  final List<String> failedUserIds;
+
+  const GlobalMigrationResult({
+    required this.totalUsers,
+    required this.usersWithData,
+    required this.totalMigrated,
+    required this.totalFailed,
+    required this.totalSkipped,
+    required this.failedUserIds,
+  });
+
+  bool get isFullSuccess => totalFailed == 0;
+  bool get hasFailures => totalFailed > 0;
+  int get totalProcessed => totalMigrated + totalFailed + totalSkipped;
+
+  @override
+  String toString() =>
+      'GlobalMigrationResult(users: $totalUsers, migrated: $totalMigrated, failed: $totalFailed)';
 }

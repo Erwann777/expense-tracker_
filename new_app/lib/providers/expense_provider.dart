@@ -21,7 +21,12 @@ class ExpenseProvider with ChangeNotifier {
   String? _userId;
 
   StreamSubscription<List<ExpenseModel>>? _expenseSubscription;
+  StreamSubscription<List<ExpenseModel>>? _incomeSubscription;
   StreamSubscription<List<RecurringExpenseModel>>? _recurringSubscription;
+
+  // Internal caches for each collection
+  List<ExpenseModel> _expenseCache = [];
+  List<ExpenseModel> _incomeCache = [];
 
   List<ExpenseModel> get expenses => _expenses;
   List<ExpenseModel> get todayExpenses => _todayExpenses;
@@ -56,6 +61,7 @@ class ExpenseProvider with ChangeNotifier {
   @override
   void dispose() {
     _expenseSubscription?.cancel();
+    _incomeSubscription?.cancel();
     _recurringSubscription?.cancel();
     super.dispose();
   }
@@ -69,17 +75,33 @@ class ExpenseProvider with ChangeNotifier {
   void _setupRealtimeListeners() {
     if (_userId == null) return;
 
+    // ── Expenses stream (type=expense) ──
     _expenseSubscription?.cancel();
     _expenseSubscription = FirebaseService.instance
         .getExpensesStream(_userId!)
         .listen(
       (expenses) {
-        _expenses = expenses;
-        _isLoading = false;
-        _recalculateAggregates();
+        _expenseCache = expenses;
+        _mergeAndRecalculate();
       },
       onError: (e) {
         debugPrint('Error in expenses stream: $e');
+        _isLoading = false;
+        notifyListeners();
+      },
+    );
+
+    // ── Income stream (type=income) ──
+    _incomeSubscription?.cancel();
+    _incomeSubscription = FirebaseService.instance
+        .getIncomeStream(_userId!)
+        .listen(
+      (income) {
+        _incomeCache = income;
+        _mergeAndRecalculate();
+      },
+      onError: (e) {
+        debugPrint('Error in income stream: $e');
         _isLoading = false;
         notifyListeners();
       },
@@ -97,6 +119,14 @@ class ExpenseProvider with ChangeNotifier {
         debugPrint('Error in recurring expenses stream (expense provider): $e');
       },
     );
+  }
+
+  /// Gabungkan _expenseCache + _incomeCache → _expenses, kemudian recalculate
+  void _mergeAndRecalculate() {
+    _expenses = [..._expenseCache, ..._incomeCache];
+    _expenses.sort((a, b) => b.date.compareTo(a.date));
+    _isLoading = false;
+    _recalculateAggregates();
   }
 
   void _recalculateAggregates() {
@@ -318,10 +348,10 @@ class ExpenseProvider with ChangeNotifier {
     }
   }
 
-  Future<bool> deleteExpense(String id) async {
+  Future<bool> deleteExpense(String id, {bool isIncome = false}) async {
     if (_userId == null) return false;
     try {
-      await FirebaseService.instance.deleteExpense(id, _userId!);
+      await FirebaseService.instance.deleteExpense(id, _userId!, isIncome: isIncome);
       return true;
     } catch (e) {
       debugPrint('Error deleting expense: $e');
@@ -408,9 +438,13 @@ class ExpenseProvider with ChangeNotifier {
   void clear() {
     _expenseSubscription?.cancel();
     _expenseSubscription = null;
+    _incomeSubscription?.cancel();
+    _incomeSubscription = null;
     _recurringSubscription?.cancel();
     _recurringSubscription = null;
     _expenses = [];
+    _expenseCache = [];
+    _incomeCache = [];
     _todayExpenses = [];
     _monthlyExpenses = [];
     _last7DaysExpenses = [];

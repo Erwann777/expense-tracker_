@@ -10,7 +10,8 @@ import '../../providers/auth_provider.dart';
 import '../../providers/expense_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/goals_provider.dart';
-import '../../providers/pin_auth_provider.dart';
+import '../../providers/pin_auth_provider.dart';
+
 import '../../providers/currency_provider.dart';
 import '../../models/currency_model.dart';
 import '../../utils/app_theme.dart';
