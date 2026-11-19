@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Struktur baru: users/{userId}/expenses|income|savings_goals|recurring_expenses
+// expenses  → transaksi type=expense sahaja
+// income    → transaksi type=income sahaja
+// Semua data user disimpan sebagai subcollection di bawah users/{userId}/
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Users (profil) ───────────────────────────────────
+    match /users/{userId} {
+      allow read, write: if true;
+
+      // ── Expenses subcollection (type=expense) ─────────
+      match /expenses/{expenseId} {
+        allow read, write: if true;
+      }
+
+      // ── Income subcollection (type=income) ────────────
+      match /income/{incomeId} {
+        allow read, write: if true;
+      }
+
+      // ── Savings Goals subcollection ──────────────────
+      match /savings_goals/{goalId} {
+        allow read, write: if true;
+      }
+
+      // ── Recurring Expenses subcollection ─────────────
+      match /recurring_expenses/{recurringId} {
+        allow read, write: if true;
+      }
+    }
+  }
+}
