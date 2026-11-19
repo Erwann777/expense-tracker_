@@ -1,9 +1,14 @@
+# ──────────────────────────────────────────
 # Miscellaneous
+# ──────────────────────────────────────────
 *.class
 *.log
 *.pyc
 *.swp
+*.swo
+*~
 .DS_Store
+Thumbs.db
 .atom/
 .build/
 .buildlog/
@@ -12,37 +17,67 @@
 .swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# ──────────────────────────────────────────
+# IDE & Editor
+# ──────────────────────────────────────────
 *.iml
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
+# Uncomment below if you don't want to share VS Code settings:
 #.vscode/
 
-# Flutter/Dart/Pub related
+# ──────────────────────────────────────────
+# Flutter / Dart / Pub
+# ──────────────────────────────────────────
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
 
-# Symbolication related
+# ──────────────────────────────────────────
+# Symbolication & Obfuscation
+# ──────────────────────────────────────────
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# ──────────────────────────────────────────
+# Android build artifacts
+# ──────────────────────────────────────────
 /android/app/debug
 /android/app/profile
 /android/app/release
 
-# Environment variables - jangan di-commit ke git!
+# ──────────────────────────────────────────
+# Environment Variables & Secrets
+# ──────────────────────────────────────────
 .env
+.env.local
+.env.*.local
+**/service-account*.json
+**/private-key*.json
+google-services.json
+GoogleService-Info.plist
+
+# ──────────────────────────────────────────
+# Firebase
+# ──────────────────────────────────────────
+**/firebase-export*/
+**/.firebase/
+
+# ──────────────────────────────────────────
+# SQLite / Local Database
+# ──────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ──────────────────────────────────────────
+# Node modules (if used in tooling)
+# ──────────────────────────────────────────
+node_modules/

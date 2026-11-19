@@ -53,14 +53,28 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  String get _monthLabel =>
-      _monthNames[_selectedMonth - 1];
+  String get _monthLabel => _monthNames[_selectedMonth - 1];
 
   static const _monthNames = [
     'January', 'February', 'March', 'April',
-    'May',     'June',     'July',  'August',
-    'September','October', 'November','December',
+    'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December',
   ];
+
+  /// Removes Markdown formatting (especially "*" characters) from AI output.
+  String _stripMarkdown(String text) {
+    return text
+        // leading "* " bullets  ->  "- " bullets (do this first)
+        .replaceAllMapped(RegExp(r'^\s*\*\s+', multiLine: true), (_) => '- ')
+        // **bold** and __bold__  ->  bold
+        .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1)!)
+        .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m.group(1)!)
+        // *italic*  ->  italic
+        .replaceAllMapped(
+            RegExp(r'(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)'), (m) => m.group(1)!)
+        // any leftover stray asterisks
+        .replaceAll('*', '');
+  }
 
   Future<void> _getAdvice() async {
     HapticFeedback.mediumImpact();
@@ -142,9 +156,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? AppTheme.darkDivider
-                        : AppTheme.divider,
+                    color: isDark ? AppTheme.darkDivider : AppTheme.divider,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -154,8 +166,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color:
-                        isDark ? AppTheme.darkText : AppTheme.textPrimary,
+                    color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -165,17 +176,15 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
                   children: [
                     IconButton(
                       icon: const Icon(Icons.chevron_left_rounded),
-                      onPressed: () =>
-                          setSheet(() => tempYear--),
+                      onPressed: () => setSheet(() => tempYear--),
                     ),
                     Text(
                       '$tempYear',
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? AppTheme.darkText
-                            : AppTheme.textPrimary,
+                        color:
+                            isDark ? AppTheme.darkText : AppTheme.textPrimary,
                       ),
                     ),
                     IconButton(
@@ -277,10 +286,10 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final auth = context.watch<AuthProvider>();
     final expProvider = context.watch<ExpenseProvider>();
     final currencyProvider = context.watch<CurrencyProvider>();
-    final user = auth.currentUser;
+    // Keep watching auth so the screen rebuilds on auth changes
+    context.watch<AuthProvider>();
 
     // Guna displayCurrency & conversionRate dari CurrencyProvider
     final currencySymbol = currencyProvider.displaySymbol;
@@ -298,8 +307,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
     final txCount = monthExpenses.length;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBg : AppTheme.surfaceLight,
+      backgroundColor: isDark ? AppTheme.darkBg : AppTheme.surfaceLight,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         title: Text(
@@ -322,8 +330,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
             child: Icon(
               Icons.arrow_back_rounded,
               size: 20,
-              color:
-                  isDark ? AppTheme.darkText : AppTheme.textPrimary,
+              color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
             ),
           ),
           onPressed: () => Navigator.pop(context),
@@ -438,14 +445,12 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
     return GestureDetector(
       onTap: _pickMonth,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkCard : Colors.white,
           borderRadius: BorderRadius.circular(AppTheme.radiusMd),
           border: Border.all(
-            color:
-                isDark ? AppTheme.darkDivider : AppTheme.divider,
+            color: isDark ? AppTheme.darkDivider : AppTheme.divider,
           ),
         ),
         child: Row(
@@ -461,17 +466,14 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               style: GoogleFonts.inter(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: isDark
-                    ? AppTheme.darkText
-                    : AppTheme.textPrimary,
+                color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
               ),
             ),
             const Spacer(),
             Icon(
               Icons.expand_more_rounded,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.textMuted,
+              color:
+                  isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted,
             ),
           ],
         ),
@@ -493,8 +495,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
           icon: Icons.arrow_upward_rounded,
           iconColor: AppTheme.errorRed,
           label: 'Spent',
-          value:
-              '$currencySymbol ${totalExpense.toStringAsFixed(2)}',
+          value: '$currencySymbol ${totalExpense.toStringAsFixed(2)}',
         ),
         const SizedBox(width: 10),
         _statChip(
@@ -502,8 +503,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
           icon: Icons.arrow_downward_rounded,
           iconColor: AppTheme.accentGreen,
           label: 'Income',
-          value:
-              '$currencySymbol ${totalIncome.toStringAsFixed(2)}',
+          value: '$currencySymbol ${totalIncome.toStringAsFixed(2)}',
         ),
         const SizedBox(width: 10),
         _statChip(
@@ -531,8 +531,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
           color: isDark ? AppTheme.darkCard : Colors.white,
           borderRadius: BorderRadius.circular(AppTheme.radiusMd),
           border: Border.all(
-            color:
-                isDark ? AppTheme.darkDivider : AppTheme.divider,
+            color: isDark ? AppTheme.darkDivider : AppTheme.divider,
           ),
         ),
         child: Column(
@@ -544,9 +543,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: isDark
-                    ? AppTheme.darkText
-                    : AppTheme.textPrimary,
+                color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
               ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -577,12 +574,10 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
           disabledBackgroundColor:
               AppTheme.accentPurple.withValues(alpha: 0.5),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(AppTheme.radiusMd),
+            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
           ),
           elevation: 4,
-          shadowColor:
-              AppTheme.accentPurple.withValues(alpha: 0.4),
+          shadowColor: AppTheme.accentPurple.withValues(alpha: 0.4),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -591,9 +586,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
                 color: Colors.white, size: 20),
             const SizedBox(width: 10),
             Text(
-              _advice != null
-                  ? 'Refresh AI Advice'
-                  : 'Get AI Budget Advice',
+              _advice != null ? 'Refresh AI Advice' : 'Get AI Budget Advice',
               style: GoogleFonts.inter(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
@@ -614,8 +607,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
         color: isDark ? AppTheme.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusXl),
         border: Border.all(
-          color:
-              AppTheme.accentPurple.withValues(alpha: 0.3),
+          color: AppTheme.accentPurple.withValues(alpha: 0.3),
         ),
       ),
       child: Column(
@@ -634,9 +626,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
             style: GoogleFonts.inter(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: isDark
-                  ? AppTheme.darkText
-                  : AppTheme.textPrimary,
+              color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
             ),
           ),
           const SizedBox(height: 6),
@@ -654,9 +644,8 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
             'Ensure you have a stable internet connection.',
             style: GoogleFonts.inter(
               fontSize: 11,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.textMuted,
+              color:
+                  isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted,
             ),
           ),
         ],
@@ -671,8 +660,8 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
       decoration: BoxDecoration(
         color: AppTheme.errorRed.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-        border: Border.all(
-            color: AppTheme.errorRed.withValues(alpha: 0.3)),
+        border:
+            Border.all(color: AppTheme.errorRed.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -748,8 +737,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: AppTheme.accentPurple
-                      .withValues(alpha: 0.1),
+                  color: AppTheme.accentPurple.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
@@ -785,9 +773,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
           ),
           const SizedBox(height: 16),
           Divider(
-            color: isDark
-                ? AppTheme.darkDivider
-                : AppTheme.divider,
+            color: isDark ? AppTheme.darkDivider : AppTheme.divider,
           ),
           const SizedBox(height: 14),
 
@@ -796,9 +782,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
 
           const SizedBox(height: 14),
           Divider(
-            color: isDark
-                ? AppTheme.darkDivider
-                : AppTheme.divider,
+            color: isDark ? AppTheme.darkDivider : AppTheme.divider,
           ),
           const SizedBox(height: 10),
           Row(
@@ -806,9 +790,8 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               Icon(
                 Icons.info_outline_rounded,
                 size: 13,
-                color: isDark
-                    ? AppTheme.darkTextSecondary
-                    : AppTheme.textMuted,
+                color:
+                    isDark ? AppTheme.darkTextSecondary : AppTheme.textMuted,
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -831,7 +814,9 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
 
   List<Widget> _buildAdviceLines(bool isDark) {
     if (_advice == null) return [];
-    final lines = _advice!.split('\n');
+
+    // Strip Markdown asterisks before rendering
+    final lines = _stripMarkdown(_advice!).split('\n');
     final widgets = <Widget>[];
 
     for (final line in lines) {
@@ -843,12 +828,10 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
 
       // Section headers (lines that start with emoji or ##)
       final isSectionHeader = trimmed.length > 1 &&
-          (trimmed.startsWith('##') ||
-              _startsWithEmoji(trimmed));
+          (trimmed.startsWith('##') || _startsWithEmoji(trimmed));
 
       if (isSectionHeader) {
-        final headerText =
-            trimmed.replaceFirst(RegExp(r'^##\s*'), '');
+        final headerText = trimmed.replaceFirst(RegExp(r'^##\s*'), '');
         widgets.add(
           Padding(
             padding: const EdgeInsets.only(top: 10, bottom: 4),
@@ -857,15 +840,12 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               style: GoogleFonts.inter(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
-                color: isDark
-                    ? AppTheme.darkText
-                    : AppTheme.textPrimary,
+                color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
               ),
             ),
           ),
         );
-      } else if (trimmed.startsWith('- ') ||
-          trimmed.startsWith('• ')) {
+      } else if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
         // Bullet point
         final bulletText = trimmed.substring(2);
         widgets.add(
@@ -887,9 +867,8 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
                     bulletText,
                     style: GoogleFonts.inter(
                       fontSize: 13,
-                      color: isDark
-                          ? AppTheme.darkText
-                          : AppTheme.textPrimary,
+                      color:
+                          isDark ? AppTheme.darkText : AppTheme.textPrimary,
                       height: 1.5,
                     ),
                   ),
@@ -907,9 +886,7 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
               trimmed,
               style: GoogleFonts.inter(
                 fontSize: 13,
-                color: isDark
-                    ? AppTheme.darkText
-                    : AppTheme.textPrimary,
+                color: isDark ? AppTheme.darkText : AppTheme.textPrimary,
                 height: 1.6,
               ),
             ),
@@ -926,4 +903,3 @@ class _AiBudgetAdvisorScreenState extends State<AiBudgetAdvisorScreen>
     return runes.first > 0x7F;
   }
 }
-
