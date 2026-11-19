@@ -43,10 +43,12 @@ class _MainShellState extends State<MainShell> {
         context.read<GoalsProvider>().setUserId(uid);
         context.read<RecurringProvider>().setUserId(uid);
 
-        // Init live currency conversion
+        // Init live currency conversion.
+        // baseCurrency = where expenses are stored; currency = what to display.
+        // After a currency change, both are always synced to the same value.
         final user = auth.currentUser!;
         context.read<CurrencyProvider>().init(
-          user.baseCurrency,
+          user.baseCurrency.isNotEmpty ? user.baseCurrency : user.currency,
           user.currency,
         );
 

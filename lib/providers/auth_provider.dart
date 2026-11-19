@@ -123,13 +123,17 @@ class AuthProvider with ChangeNotifier {
   }
 
   /// Update both currency and monthly budget in a single atomic Firestore update.
+  /// Also updates [baseCurrency] when provided — this should always be passed
+  /// when the user changes their primary currency in Settings.
   Future<void> updateCurrencyAndBudget({
     required String currency,
     required double budget,
+    String? baseCurrency,
   }) async {
     if (_currentUser == null) return;
     final updated = _currentUser!.copyWith(
       currency: currency,
+      baseCurrency: baseCurrency ?? currency,
       monthlyBudget: budget,
     );
     _currentUser = updated;

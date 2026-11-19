@@ -1045,17 +1045,19 @@ class SettingsScreen extends StatelessWidget {
                           newBudget = converted.roundToDouble();
                         }
 
+                        // Update both currency and baseCurrency in Firestore
                         await auth.updateCurrencyAndBudget(
                           currency: newCurrency,
+                          baseCurrency: newCurrency,
                           budget: newBudget,
                         );
 
                         if (context.mounted) {
                           context.read<ExpenseProvider>().loadExpenses();
-                          // Update live exchange rates
+                          // Re-init provider with both base and display set to new currency
                           await context
                               .read<CurrencyProvider>()
-                              .changeDisplayCurrency(newCurrency);
+                              .changeBaseCurrency(newCurrency);
                         }
                       }
 
